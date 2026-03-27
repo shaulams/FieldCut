@@ -943,6 +943,25 @@ def stream_audio(filepath):
 def download(filename):
     return send_file(os.path.join(pdir("output"), filename), as_attachment=True)
 
+@app.route("/export_clips_zip")
+def export_clips_zip():
+    import zipfile, io
+    state = load_state()
+    clips = state.get("clips", [])
+    if not clips:
+        return jsonify({"error": "No clips to export"}), 400
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for clip in clips:
+            path = clip.get("path", "")
+            if path and os.path.exists(path):
+                zf.write(path, os.path.basename(path))
+    buf.seek(0)
+    project_name = state.get("project_name", "clips")
+    zip_name = f"{project_name}_clips.zip"
+    return Response(buf.read(), mimetype="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{zip_name}"'})
+
 @app.route("/download_output")
 def download_output():
     """Download the most recent assembled output for the active project."""

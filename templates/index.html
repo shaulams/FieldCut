@@ -383,7 +383,10 @@
       </div>
 
       <div id="phase1-done-actions" style="display:none">
-        <a href="/export_transcript" class="btn" style="display:block;text-align:center;margin-bottom:6px;text-decoration:none" data-i18n="download_transcript"></a>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <a href="/export_clips_zip" class="btn btn-primary" style="flex:1;text-align:center;text-decoration:none" data-i18n="download_clips_zip"></a>
+          <a href="/export_transcript" class="btn" style="flex:1;text-align:center;text-decoration:none" data-i18n="download_transcript"></a>
+        </div>
         <button class="btn btn-primary" onclick="goToPhase(2)" data-i18n="finish_narration"></button>
       </div>
     </div>

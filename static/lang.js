@@ -29,6 +29,7 @@ const LANGS = {
     clips_title: "CLIPS",
     clips_empty: "— select text in transcript to mark clips —",
     cut_clips: "✂ cut clips",
+    download_clips_zip: "⬇ download clips (.zip)",
     download_transcript: "Download transcript (Word)",
     finish_narration: "finish phase — narration →",
 
@@ -145,6 +146,7 @@ const LANGS = {
     clips_title: "קליפים",
     clips_empty: "— סמן טקסט בתמלול כדי ליצור קליפים —",
     cut_clips: "✂ חתוך קליפים",
+    download_clips_zip: "⬇ הורד קליפים (.zip)",
     download_transcript: "הורד תמלול (Word)",
     finish_narration: "סיום שלב — קריינות ←",
 

@@ -1,0 +1,1169 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Field Cut</title>
+<style>
+  :root {
+    --bg: #0e0e0e;
+    --bg2: #161616;
+    --bg3: #1e1e1e;
+    --border: #2a2a2a;
+    --text: #e8e8e8;
+    --text2: #888;
+    --text3: #555;
+    --green: #1D9E75;
+    --green-dim: rgba(29,158,117,0.12);
+    --blue: #378ADD;
+    --blue-dim: rgba(55,138,221,0.1);
+    --mono: 'JetBrains Mono', 'Fira Mono', monospace;
+    --sans: 'Heebo', 'Assistant', system-ui, sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; height: 100vh; display: flex; flex-direction: column; }
+
+  /* TOP BAR */
+  .topbar { height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+  .logo { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.15em; color: var(--green); }
+  .file-info { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .topbar-btn { font-family: var(--mono); font-size: 10px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+  .topbar-btn:hover { border-color: var(--green); color: var(--green); }
+  .project-name { font-family: var(--mono); font-size: 11px; color: var(--text); cursor: pointer; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; transition: all 0.15s; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .project-name:hover { border-color: var(--border); color: var(--green); }
+  .topbar-sep { width: 1px; height: 20px; background: var(--border); }
+  .status-pill { font-family: var(--mono); font-size: 10px; padding: 3px 10px; border-radius: 20px; margin-left: auto; }
+
+  /* PROJECTS DRAWER */
+  .projects-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; }
+  .projects-overlay.open { display: block; }
+  .projects-drawer { position: fixed; top: 0; left: 0; width: 320px; height: 100vh; background: var(--bg2); border-left: 1px solid var(--border); z-index: 201; transform: translateX(-100%); transition: transform 0.2s ease; display: flex; flex-direction: column; }
+  .projects-overlay.open .projects-drawer { transform: translateX(0); }
+  .drawer-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
+  .drawer-header h2 { font-family: var(--mono); font-size: 11px; letter-spacing: 0.1em; color: var(--text2); }
+  .drawer-close { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 18px; padding: 4px; }
+  .drawer-close:hover { color: var(--text); }
+  .drawer-body { flex: 1; overflow-y: auto; padding: 8px; }
+  .drawer-project { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 6px; cursor: pointer; transition: background 0.15s; border: 1px solid transparent; }
+  .drawer-project:hover { background: var(--bg3); border-color: var(--border); }
+  .drawer-project.active { border-color: rgba(29,158,117,0.3); background: rgba(29,158,117,0.05); }
+  .drawer-project-name { font-family: var(--mono); font-size: 11px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .drawer-project-meta { font-family: var(--mono); font-size: 9px; color: var(--text3); }
+  .drawer-empty { font-family: var(--mono); font-size: 10px; color: var(--text3); text-align: center; padding: 32px 16px; }
+  .drawer-footer { padding: 12px; border-top: 1px solid var(--border); }
+  .status-idle { background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
+  .status-working { background: rgba(55,138,221,0.15); color: var(--blue); border: 1px solid rgba(55,138,221,0.3); }
+  .status-done { background: rgba(29,158,117,0.15); color: var(--green); border: 1px solid rgba(29,158,117,0.3); }
+  .status-error { background: rgba(200,50,50,0.15); color: #e06060; border: 1px solid rgba(200,50,50,0.3); }
+
+  /* LAYOUT */
+  .main { display: grid; grid-template-columns: 1fr 280px; flex: 1; overflow: hidden; }
+  .center { display: flex; flex-direction: column; overflow: hidden; }
+  .right { border-right: 1px solid var(--border); overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+
+  /* TRANSCRIPT PANES */
+  .transcript-pane { overflow-y: auto; padding: 16px 24px; flex: 1; min-height: 0; }
+  .narration-pane { overflow-y: auto; padding: 16px 24px; border-top: 2px solid var(--border); flex: 0 0 auto; max-height: 35%; display: none; }
+  .narration-pane.active { display: block; flex: 1; min-height: 0; }
+  .pane-label { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .pane-label .label-count { color: var(--text2); }
+
+  /* WORD-LEVEL TRANSCRIPT */
+  .paragraph { margin-bottom: 14px; line-height: 1.8; position: relative; }
+  .para-ts { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-left: 8px; cursor: pointer; user-select: none; }
+  .para-ts:hover { color: var(--text2); }
+  .w { cursor: text; color: var(--text2); transition: background 0.1s; border-radius: 2px; padding: 1px 0; }
+  .w:hover { background: rgba(255,255,255,0.04); }
+  .w.clip-highlight { background: var(--green-dim); color: var(--text); }
+  .w.narr-highlight { background: var(--blue-dim); color: var(--text); }
+  .clip-boundary-start { border-right: 2px solid var(--green); padding-right: 2px; }
+  .clip-boundary-end { border-left: 2px solid var(--green); padding-left: 2px; }
+  .narr-boundary-start { border-right: 2px solid var(--blue); padding-right: 2px; }
+  .narr-boundary-end { border-left: 2px solid var(--blue); padding-left: 2px; }
+  .clip-label { font-family: var(--mono); font-size: 8px; padding: 1px 5px; border-radius: 2px; background: rgba(29,158,117,0.25); color: var(--green); margin-right: 3px; vertical-align: middle; user-select: none; }
+  .narr-label { font-family: var(--mono); font-size: 8px; padding: 1px 5px; border-radius: 2px; background: rgba(55,138,221,0.25); color: var(--blue); margin-right: 3px; vertical-align: middle; user-select: none; }
+
+  /* FLOATING TOOLBAR */
+  .sel-toolbar { position: fixed; display: none; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 100; gap: 3px; flex-direction: row; }
+  .sel-toolbar.visible { display: flex; }
+  .sel-btn { padding: 5px 10px; border-radius: 5px; font-family: var(--mono); font-size: 10px; border: none; cursor: pointer; background: transparent; color: var(--text2); transition: all 0.1s; white-space: nowrap; }
+  .sel-btn:hover { background: var(--bg3); color: var(--text); }
+  .sel-btn.sel-play { color: var(--blue); }
+  .sel-btn.sel-play:hover { background: rgba(55,138,221,0.1); }
+  .sel-btn.sel-mark { color: var(--green); }
+  .sel-btn.sel-mark:hover { background: var(--green-dim); }
+  .sel-btn.sel-playing { color: var(--blue); animation: pulse-play 1s ease infinite; }
+  @keyframes pulse-play { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+  /* UPLOAD ZONE */
+  .upload-zone { border: 1px dashed var(--border); border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: border-color 0.2s; }
+  .upload-zone:hover { border-color: var(--green); }
+  .upload-zone p { font-size: 13px; color: var(--text2); }
+  .upload-zone small { font-family: var(--mono); font-size: 11px; color: var(--text3); }
+
+  /* ASSEMBLY TIMELINE */
+  .asm-sources { display: flex; gap: 16px; margin-bottom: 10px; }
+  .asm-source-group { flex: 1; }
+  .asm-source-group h4 { font-family: var(--mono); font-size: 9px; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 6px; }
+  .asm-source-items { display: flex; flex-wrap: wrap; gap: 4px; }
+  .asm-chip { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 4px; font-family: var(--mono); font-size: 10px; cursor: grab; user-select: none; white-space: nowrap; }
+  .asm-chip:active { opacity: 0.6; }
+  .asm-chip.used { opacity: 0.25; }
+  .asm-chip.chip-clip { background: rgba(29,158,117,0.15); color: var(--green); border: 1px solid rgba(29,158,117,0.3); }
+  .asm-chip.chip-narr { background: rgba(55,138,221,0.15); color: var(--blue); border: 1px solid rgba(55,138,221,0.3); }
+  .asm-chip.dragging { opacity: 0.4; }
+  .asm-timeline { min-height: 44px; background: var(--bg3); border: 2px dashed var(--border); border-radius: 6px; display: flex; align-items: center; gap: 4px; padding: 6px 8px; flex-wrap: wrap; transition: border-color 0.2s; }
+  .asm-timeline.drag-over { border-color: var(--green); background: rgba(29,158,117,0.04); }
+  .asm-timeline:empty::after { content: 'drag clips and narration here to build the rough cut'; font-family: var(--mono); font-size: 10px; color: var(--text3); margin: auto; }
+  .asm-tl-item { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; border-radius: 4px; font-family: var(--mono); font-size: 10px; cursor: grab; user-select: none; white-space: nowrap; position: relative; }
+  .asm-tl-item.tl-clip { background: rgba(29,158,117,0.2); color: var(--green); }
+  .asm-tl-item.tl-narr { background: rgba(55,138,221,0.2); color: var(--blue); }
+  .asm-tl-item .asm-x { margin-right: -2px; cursor: pointer; color: inherit; opacity: 0.4; font-size: 12px; }
+  .asm-tl-item .asm-x:hover { opacity: 1; }
+  .asm-tl-item.drag-over-left { box-shadow: inset 3px 0 0 var(--text); }
+  .asm-tl-item.drag-over-right { box-shadow: inset -3px 0 0 var(--text); }
+  .asm-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
+  .asm-actions .btn { width: auto; padding: 7px 16px; }
+
+  /* RIGHT PANEL */
+  .panel { background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 12px; }
+  .panel h3 { font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; color: var(--text3); margin-bottom: 10px; }
+  .step-row { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+  .step-num { width: 18px; height: 18px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 8px; font-weight: 600; flex-shrink: 0; }
+  .step-done { background: rgba(29,158,117,0.2); color: var(--green); }
+  .step-active { background: rgba(55,138,221,0.2); color: var(--blue); }
+  .step-idle { background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
+  .step-text { font-size: 11px; color: var(--text2); }
+
+  .clip-item { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid var(--border); }
+  .clip-item:last-child { border-bottom: none; }
+  .clip-num { font-family: var(--mono); font-size: 10px; color: var(--text3); width: 20px; flex-shrink: 0; }
+  .clip-name { font-family: var(--mono); font-size: 10px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .clip-dur { font-family: var(--mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+  .clip-x { font-size: 12px; color: var(--text3); cursor: pointer; flex-shrink: 0; }
+  .clip-x:hover { color: #e06060; }
+  .clip-text-preview { font-size: 10px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+
+  .btn { width: 100%; padding: 8px 12px; border-radius: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; text-align: center; transition: all 0.15s; }
+  .btn:hover { background: var(--bg3); color: var(--text); }
+  .btn-primary { border-color: rgba(29,158,117,0.5); color: var(--green); }
+  .btn-primary:hover { background: var(--green-dim); }
+  .btn-danger { border-color: rgba(200,50,50,0.3); color: #e06060; }
+  .btn-danger:hover { background: rgba(200,50,50,0.08); }
+
+  input[type="file"] { display: none; }
+  textarea { background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 6px 8px; font-family: var(--sans); font-size: 11px; width: 100%; resize: vertical; min-height: 50px; margin-bottom: 4px; }
+  textarea:focus { outline: none; border-color: var(--green); }
+
+  /* PROGRESS BAR */
+  .progress-bar { display: none; margin-top: 6px; }
+  .progress-bar.active { display: block; }
+  .progress-track { height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
+  .progress-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width 0.3s ease; }
+  .progress-fill.indeterminate { width: 30% !important; animation: indeterminate 1.5s ease-in-out infinite; }
+  @keyframes indeterminate { 0% { margin-left: 0%; } 50% { margin-left: 70%; } 100% { margin-left: 0%; } }
+  .progress-label { font-family: var(--mono); font-size: 9px; color: var(--text2); margin-top: 4px; display: flex; justify-content: space-between; }
+  .progress-label .elapsed { color: var(--text3); }
+
+  .hint { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-top: 2px; }
+
+  /* PHASE BAR */
+  .phase-bar { display: flex; align-items: center; justify-content: center; gap: 0; padding: 10px 20px; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .phase-step { display: flex; align-items: center; gap: 8px; padding: 6px 16px; border-radius: 6px; cursor: pointer; transition: all 0.2s; opacity: 0.4; }
+  .phase-step:hover { opacity: 0.7; }
+  .phase-step.active { opacity: 1; background: var(--bg3); }
+  .phase-step.completed { opacity: 0.8; cursor: pointer; }
+  .phase-step.completed .phase-num { background: rgba(29,158,117,0.2); color: var(--green); border-color: rgba(29,158,117,0.3); }
+  .phase-step.future { pointer-events: none; opacity: 0.25; }
+  .phase-num { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-size: 10px; font-weight: 600; background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
+  .phase-step.active .phase-num { background: rgba(55,138,221,0.2); color: var(--blue); border-color: rgba(55,138,221,0.3); }
+  .phase-label { font-family: var(--mono); font-size: 11px; color: var(--text2); }
+  .phase-connector { width: 32px; height: 1px; background: var(--border); }
+
+  /* PHASE SCREENS */
+  .phase-screen { display: none; flex: 1; overflow: hidden; }
+  .phase-screen.active { display: flex; flex-direction: column; }
+</style>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="topbar">
+  <span class="logo" style="cursor:pointer" onclick="toggleProjectsDrawer()">FIELD CUT</span>
+  <span class="topbar-sep"></span>
+  <span class="project-name" id="project-name" onclick="renameProject()" title="Click to rename">untitled</span>
+  <span class="file-info" id="file-info"></span>
+  <button class="topbar-btn" onclick="toggleProjectsDrawer()">projects</button>
+  <button class="topbar-btn" onclick="newProject()">+ new project</button>
+  <span class="status-pill status-idle" id="status-pill">idle</span>
+</div>
+
+<!-- PROJECTS DRAWER -->
+<div class="projects-overlay" id="projects-overlay" onclick="closeProjectsDrawer(event)">
+  <div class="projects-drawer" onclick="event.stopPropagation()">
+    <div class="drawer-header">
+      <h2>PROJECTS</h2>
+      <button class="drawer-close" onclick="closeProjectsDrawer()">&times;</button>
+    </div>
+    <div class="drawer-body" id="drawer-body">
+      <div class="drawer-empty">No saved projects yet</div>
+    </div>
+    <div class="drawer-footer">
+      <button class="btn btn-primary" onclick="saveCurrentProject()" style="margin-bottom:6px">save current project</button>
+      <button class="btn" onclick="newProject(); closeProjectsDrawer();">+ new project</button>
+    </div>
+  </div>
+</div>
+
+<div class="phase-bar" id="phase-bar">
+  <div class="phase-step active" data-phase="1" onclick="goToPhase(1)">
+    <span class="phase-num">1</span>
+    <span class="phase-label">Interview</span>
+  </div>
+  <div class="phase-connector"></div>
+  <div class="phase-step" data-phase="2" onclick="goToPhase(2)">
+    <span class="phase-num">2</span>
+    <span class="phase-label">Narration (optional)</span>
+  </div>
+  <div class="phase-connector"></div>
+  <div class="phase-step" data-phase="3" onclick="goToPhase(3)">
+    <span class="phase-num">3</span>
+    <span class="phase-label">Assembly</span>
+  </div>
+</div>
+
+<!-- PHASE 1: INTERVIEW -->
+<div class="phase-screen active" id="phase-1">
+  <div class="main">
+  <div class="center">
+      <div class="transcript-pane" id="transcript-pane">
+        <div class="pane-label">TRANSCRIPT — select text to mark clips</div>
+        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('audio-input').click()">
+          <p>גרור קובץ WAV / MP3 או לחץ לבחירה</p>
+          <small>transcription via OpenAI Whisper · Hebrew</small>
+        </div>
+        <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
+        <div id="transcript-body"></div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="progress-bar" id="progress-bar">
+        <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+        <div class="progress-label"><span id="progress-msg">—</span><span class="elapsed" id="progress-elapsed"></span></div>
+      </div>
+
+      <div class="panel">
+        <h3>CLIPS</h3>
+        <div id="clips-list"><span class="hint">— select text in transcript to mark clips —</span></div>
+        <br>
+        <button class="btn btn-primary" onclick="cutClips()">✂ cut clips</button>
+      </div>
+
+      <div id="phase1-done-actions" style="display:none">
+        <a href="/export_transcript" class="btn" style="display:block;text-align:center;margin-bottom:6px;text-decoration:none">הורד תמלול (Word)</a>
+        <button class="btn btn-primary" onclick="goToPhase(2)">finish phase — narration →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PHASE 2: NARRATION (optional) -->
+<div class="phase-screen" id="phase-2">
+  <div class="main">
+    <div class="center">
+      <div class="narration-pane active" id="narration-pane" style="max-height:none;border-top:none;flex:1">
+        <div class="pane-label">NARRATION — select text to mark clips <span class="label-count" id="narr-count"></span></div>
+        <div id="narration-body"></div>
+      </div>
+    </div>
+    <div class="right">
+      <div class="progress-bar" id="progress-bar-p2">
+        <div class="progress-track"><div class="progress-fill" id="progress-fill-p2" style="width:0%"></div></div>
+        <div class="progress-label"><span id="progress-msg-p2">—</span><span class="elapsed" id="progress-elapsed-p2"></span></div>
+      </div>
+
+      <div class="panel">
+        <h3>SCRIPT</h3>
+        <textarea id="script-text" placeholder="הדבק כאן את תסריט הקריינות (אופציונלי)…" dir="rtl"></textarea>
+        <button class="btn" onclick="document.getElementById('script-file-input').click()" style="font-size:9px">import script from .docx / .txt</button>
+        <input type="file" id="script-file-input" accept=".docx,.txt,.doc" onchange="importScript(event)">
+      </div>
+
+      <div class="panel">
+        <h3>NARRATION AUDIO</h3>
+        <button class="btn btn-primary" onclick="document.getElementById('narr-input').click()" id="narr-upload-btn">+ upload narration audio</button>
+        <input type="file" id="narr-input" accept=".wav,.mp3" onchange="uploadNarrationAudio(event)">
+        <div id="narr-file-info" style="display:none;font-family:var(--mono);font-size:10px;color:var(--text2);margin-top:4px"></div>
+        <button class="btn btn-primary" id="transcribe-narr-btn" style="display:none;margin-top:6px" onclick="transcribeNarration()">▶ transcribe narration</button>
+      </div>
+
+      <div class="panel">
+        <h3>NARRATION CLIPS</h3>
+        <div id="narr-clips-list"></div>
+        <button class="btn btn-primary" id="cut-narr-btn" style="display:none;margin-top:6px" onclick="cutNarration()">✂ cut narration clips</button>
+      </div>
+
+      <button class="btn" onclick="goToPhase(3)" style="border-color:rgba(55,138,221,0.5);color:var(--blue)">skip to assembly →</button>
+      <div id="phase2-done-actions" style="display:none">
+        <button class="btn btn-primary" onclick="goToPhase(3)">finish phase — assembly →</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- PHASE 3: ASSEMBLY -->
+<div class="phase-screen" id="phase-3">
+  <div style="display:flex;flex-direction:column;flex:1;overflow:hidden;padding:16px 24px">
+    <div class="pane-label" style="margin-bottom:16px">ASSEMBLY — drag clips to build rough cut</div>
+
+    <div class="asm-sources" style="margin-bottom:16px">
+      <div class="asm-source-group"><h4>INTERVIEW CLIPS</h4><div class="asm-source-items" id="asm-clips-source"></div></div>
+      <div class="asm-source-group"><h4>NARRATION CLIPS</h4><div class="asm-source-items" id="asm-narr-source"></div></div>
+    </div>
+
+    <div class="asm-timeline" id="asm-timeline" style="flex:1;min-height:80px;align-content:flex-start"></div>
+
+    <div class="asm-actions" style="margin-top:12px">
+      <button class="btn btn-primary" onclick="assembleRoughCut()" style="flex:1">▶ assemble rough cut</button>
+      <button class="btn" onclick="clearAssembly()" style="flex:0 0 auto;width:auto;padding:7px 12px">clear</button>
+    </div>
+
+    <div id="phase3-done-actions" style="display:none;margin-top:12px;gap:8px">
+      <button class="btn btn-primary" onclick="saveProject()" style="flex:1">save project</button>
+      <button class="btn" onclick="newProject()" style="flex:1">new project</button>
+    </div>
+  </div>
+</div>
+
+<!-- FLOATING SELECTION TOOLBAR -->
+<div class="sel-toolbar" id="sel-toolbar">
+  <button class="sel-btn sel-play" onclick="playSelection()">▶ play</button>
+  <button class="sel-btn sel-mark" onclick="markSelection()">✂ mark clip</button>
+</div>
+
+<audio id="audio-player" preload="none" style="display:none"></audio>
+
+<script>
+let state = {};
+let pollingInterval = null;
+let progressInterval = null;
+let operationStartTime = null;
+let assemblyOrder = [];
+let currentSelection = null; // {start, end, text, source, range}
+let snippetAudio = document.getElementById('audio-player');
+
+// ── PHASE NAVIGATION ──
+function setPhase(n) {
+  // Hide all phase screens
+  document.querySelectorAll('.phase-screen').forEach(el => {
+    el.classList.remove('active');
+  });
+  // Show target
+  const target = document.getElementById('phase-' + n);
+  if (target) target.classList.add('active');
+
+  // Update phase bar
+  updatePhaseBar(n);
+}
+
+function updatePhaseBar(currentPhase) {
+  const hasClips = state.clips && state.clips.length > 0;
+  document.querySelectorAll('.phase-step').forEach(step => {
+    const p = parseInt(step.dataset.phase);
+    step.classList.remove('active', 'completed', 'future');
+    if (p === currentPhase) {
+      step.classList.add('active');
+    } else if (p < currentPhase) {
+      step.classList.add('completed');
+    } else if (p === 2) {
+      // Phase 2 is always accessible (optional phase)
+      step.classList.add('completed');
+    } else if (p === 3 && hasClips) {
+      step.classList.add('completed');
+    } else {
+      step.classList.add('future');
+    }
+  });
+}
+
+function goToPhase(n) {
+  // Phase 3 requires at least interview clips
+  if (n === 3 && !(state.clips && state.clips.length)) {
+    return;
+  }
+  fetch('/set_phase', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ phase: n })
+  });
+  setPhase(n);
+}
+
+function renderPhaseButtons() {
+  // Phase 1: show "finish" after clips are cut
+  const p1done = document.getElementById('phase1-done-actions');
+  if (p1done) p1done.style.display = (state.clips && state.clips.length) ? 'block' : 'none';
+
+  // Phase 2: show "finish" after narration clips are cut
+  const p2done = document.getElementById('phase2-done-actions');
+  if (p2done) p2done.style.display = (state.narration && state.narration.length) ? 'block' : 'none';
+
+  // Phase 3: show save/new after assembly
+  const p3done = document.getElementById('phase3-done-actions');
+  if (p3done) p3done.style.display = (state.status === 'assembled') ? 'flex' : 'none';
+}
+
+// ── INIT ──
+async function init() {
+  const res = await fetch('/state');
+  state = await res.json();
+  setPhase(state.phase || 1);
+  updateProjectName();
+  if (state.filename) document.getElementById('file-info').textContent = state.filename;
+  renderAll();
+}
+
+function renderAll() {
+  renderTranscript();
+  renderNarrationPane();
+  renderClipsList();
+  renderNarrClipsList();
+  renderAssemblyPane();
+  renderPhaseButtons();
+  updatePhaseBar(state.phase || 1);
+  // Restore narration upload state
+  if (state.narration_filename && !(state.narration_words && state.narration_words.length)) {
+    document.getElementById('narr-file-info').style.display = '';
+    document.getElementById('narr-file-info').textContent = '📎 ' + state.narration_filename;
+    document.getElementById('transcribe-narr-btn').style.display = '';
+    document.getElementById('narr-upload-btn').textContent = '↻ replace narration audio';
+  }
+}
+
+// ── TRANSCRIBE ──
+async function uploadAndTranscribe(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  document.getElementById('upload-zone').style.display = 'none';
+  document.getElementById('file-info').textContent = file.name;
+  setStatus('working', 'transcribing…');
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/transcribe', { method: 'POST', body: formData });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: 'Server error' }));
+    setStatus('error', data.error || 'Transcription failed');
+    document.getElementById('upload-zone').style.display = '';
+    return;
+  }
+  startProgressPolling();
+  startPolling();
+}
+
+function startPolling() {
+  if (pollingInterval) return;
+  pollingInterval = setInterval(async () => {
+    const res = await fetch('/status');
+    const s = await res.json();
+    if (s.status === 'transcribed') {
+      clearInterval(pollingInterval); pollingInterval = null;
+      stopProgressPolling();
+      setStatus('done', 'transcribed · ' + s.segment_count + ' passages');
+      const r = await fetch('/state'); state = await r.json();
+      renderAll();
+    } else if (s.status && s.status.startsWith('error')) {
+      clearInterval(pollingInterval); pollingInterval = null;
+      stopProgressPolling();
+      setStatus('error', s.status);
+    }
+  }, 2000);
+}
+
+// ── RENDER WORD-LEVEL TRANSCRIPT ──
+function renderTranscript() {
+  const container = document.getElementById('transcript-body');
+  container.innerHTML = '';
+  const segments = state.transcript || [];
+  const words = state.words || [];
+  if (segments.length === 0) return;
+  document.getElementById('upload-zone').style.display = 'none';
+
+  if (words.length === 0) {
+    // Fallback: no word-level data — show segments as before
+    container.innerHTML = segments.map(seg =>
+      `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span> ${seg.text}</div>`
+    ).join('');
+    return;
+  }
+
+  // Build paragraphs from segments, with word spans
+  const clips = state.text_clips || [];
+  segments.forEach(seg => {
+    const para = document.createElement('div');
+    para.className = 'paragraph';
+
+    // Timestamp label
+    const tsBtn = document.createElement('span');
+    tsBtn.className = 'para-ts';
+    tsBtn.textContent = formatTime(seg.start);
+    tsBtn.onclick = () => playSnippet(state.source_file, seg.start, seg.end);
+    para.appendChild(tsBtn);
+    para.appendChild(document.createTextNode(' '));
+
+    // Find words in this segment's time range
+    const segWords = words.filter(w => w.start >= seg.start - 0.05 && w.end <= seg.end + 0.05);
+
+    segWords.forEach(w => {
+      // Check if this word falls within any clip
+      let clipInfo = null;
+      for (const c of clips) {
+        if (w.start >= c.start - 0.01 && w.end <= c.end + 0.01) {
+          clipInfo = c;
+          break;
+        }
+      }
+
+      // Insert clip label at start of clip
+      if (clipInfo) {
+        const isFirst = segWords.indexOf(w) === 0 ||
+          !(words[words.indexOf(w) - 1] && clips.some(c => c.id === clipInfo.id && words[words.indexOf(w) - 1].start >= c.start - 0.01));
+        const prevWord = words[words.indexOf(w) - 1];
+        const isClipStart = !prevWord || prevWord.end < clipInfo.start - 0.01 || prevWord.start < clipInfo.start - 0.01;
+        if (isClipStart) {
+          const label = document.createElement('span');
+          label.className = 'clip-label';
+          label.textContent = clipInfo.id;
+          para.appendChild(label);
+        }
+      }
+
+      const span = document.createElement('span');
+      span.className = 'w' + (clipInfo ? ' clip-highlight' : '');
+      span.dataset.s = w.start;
+      span.dataset.e = w.end;
+      span.dataset.src = 'interview';
+      span.textContent = w.word;
+      para.appendChild(span);
+      para.appendChild(document.createTextNode(' '));
+    });
+
+    container.appendChild(para);
+  });
+}
+
+// ── RENDER NARRATION WORD-LEVEL ──
+function renderNarrationPane() {
+  const pane = document.getElementById('narration-pane');
+  const container = document.getElementById('narration-body');
+  const countEl = document.getElementById('narr-count');
+  const segments = state.narration_transcript || [];
+  const words = state.narration_words || [];
+
+  if (segments.length === 0) {
+    container.innerHTML = '<span class="hint">— upload narration audio and transcribe to see text here —</span>';
+    return;
+  }
+  const clipCount = (state.narr_text_clips || []).length;
+  countEl.textContent = `· ${segments.length} passages` + (clipCount ? ` · ${clipCount} clips` : '');
+
+  if (words.length === 0) {
+    container.innerHTML = segments.map(seg =>
+      `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.narration_source}',${seg.start},${seg.end})">${formatTime(seg.start)}</span> ${seg.text}</div>`
+    ).join('');
+    return;
+  }
+
+  const clips = state.narr_text_clips || [];
+  container.innerHTML = '';
+
+  segments.forEach(seg => {
+    const para = document.createElement('div');
+    para.className = 'paragraph';
+
+    const tsBtn = document.createElement('span');
+    tsBtn.className = 'para-ts';
+    tsBtn.textContent = formatTime(seg.start);
+    tsBtn.onclick = () => playSnippet(state.narration_source, seg.start, seg.end);
+    para.appendChild(tsBtn);
+    para.appendChild(document.createTextNode(' '));
+
+    const segWords = words.filter(w => w.start >= seg.start - 0.05 && w.end <= seg.end + 0.05);
+
+    segWords.forEach(w => {
+      let clipInfo = null;
+      for (const c of clips) {
+        if (w.start >= c.start - 0.01 && w.end <= c.end + 0.01) {
+          clipInfo = c; break;
+        }
+      }
+
+      if (clipInfo) {
+        const prevWord = words[words.indexOf(w) - 1];
+        const isClipStart = !prevWord || prevWord.end < clipInfo.start - 0.01 || prevWord.start < clipInfo.start - 0.01;
+        if (isClipStart) {
+          const label = document.createElement('span');
+          label.className = 'narr-label';
+          label.textContent = clipInfo.id;
+          para.appendChild(label);
+        }
+      }
+
+      const span = document.createElement('span');
+      span.className = 'w' + (clipInfo ? ' narr-highlight' : '');
+      span.dataset.s = w.start;
+      span.dataset.e = w.end;
+      span.dataset.src = 'narration';
+      span.textContent = w.word;
+      para.appendChild(span);
+      para.appendChild(document.createTextNode(' '));
+    });
+
+    container.appendChild(para);
+  });
+
+  // Show/hide cut button
+  document.getElementById('cut-narr-btn').style.display = clipCount > 0 ? '' : 'none';
+}
+
+// ── TEXT SELECTION → FLOATING TOOLBAR ──
+document.addEventListener('mouseup', (e) => {
+  const toolbar = document.getElementById('sel-toolbar');
+  const sel = window.getSelection();
+
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) {
+    setTimeout(() => { if (!toolbar.matches(':hover')) toolbar.classList.remove('visible'); }, 200);
+    return;
+  }
+
+  // Find word spans in selection
+  const range = sel.getRangeAt(0);
+  const wordSpans = [];
+  const container = range.commonAncestorContainer.nodeType === 1
+    ? range.commonAncestorContainer
+    : range.commonAncestorContainer.parentElement;
+
+  // Walk through all .w spans and check if they're in the selection
+  const allWords = container.closest('.transcript-pane, .narration-pane')?.querySelectorAll('.w') || [];
+  allWords.forEach(span => {
+    if (sel.containsNode(span, true) && span.dataset.s) {
+      wordSpans.push(span);
+    }
+  });
+
+  if (wordSpans.length === 0) {
+    toolbar.classList.remove('visible');
+    return;
+  }
+
+  const firstWord = wordSpans[0];
+  const lastWord = wordSpans[wordSpans.length - 1];
+  const startTime = parseFloat(firstWord.dataset.s);
+  const endTime = parseFloat(lastWord.dataset.e);
+  const source = firstWord.dataset.src;
+  const text = wordSpans.map(s => s.textContent).join(' ');
+
+  currentSelection = { start: startTime, end: endTime, text, source };
+
+  // Position toolbar above selection
+  const rect = range.getBoundingClientRect();
+  toolbar.style.top = (rect.top - 40 + window.scrollY) + 'px';
+  toolbar.style.left = (rect.left + rect.width / 2 - 80) + 'px';
+  toolbar.classList.add('visible');
+});
+
+// Hide toolbar on click elsewhere
+document.addEventListener('mousedown', (e) => {
+  const toolbar = document.getElementById('sel-toolbar');
+  if (!toolbar.contains(e.target)) {
+    toolbar.classList.remove('visible');
+  }
+});
+
+// ── PLAY SELECTION / SNIPPET ──
+function playSnippet(file, start, end) {
+  if (!file) return;
+  snippetAudio.src = `/audio_snippet?file=${encodeURIComponent(file)}&start=${start}&end=${end}`;
+  snippetAudio.play().catch(() => {});
+}
+
+function playSelection() {
+  if (!currentSelection) return;
+  const file = currentSelection.source === 'narration' ? state.narration_source : state.source_file;
+  const btn = document.querySelector('.sel-btn.sel-play');
+  if (snippetAudio.paused || snippetAudio.ended) {
+    playSnippet(file, currentSelection.start, currentSelection.end);
+    btn.textContent = '■ stop';
+    btn.classList.add('sel-playing');
+    snippetAudio.onended = () => { btn.textContent = '▶ play'; btn.classList.remove('sel-playing'); };
+  } else {
+    snippetAudio.pause();
+    btn.textContent = '▶ play';
+    btn.classList.remove('sel-playing');
+  }
+}
+
+async function markSelection() {
+  if (!currentSelection) return;
+  const toolbar = document.getElementById('sel-toolbar');
+  toolbar.classList.remove('visible');
+  window.getSelection().removeAllRanges();
+
+  await fetch('/add_clip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(currentSelection)
+  });
+
+  const res = await fetch('/state');
+  state = await res.json();
+  renderTranscript();
+  renderNarrationPane();
+  renderClipsList();
+  renderNarrClipsList();
+  renderAssemblyPane();
+  renderPhaseButtons();
+  updatePhaseBar(state.phase || 1);
+  currentSelection = null;
+}
+
+// ── CLIPS LIST (sidebar) ──
+function renderClipsList() {
+  const container = document.getElementById('clips-list');
+  const clips = state.text_clips || [];
+  const cutIds = new Set((state.clips || []).map(c => c.id));
+
+  if (clips.length === 0) {
+    container.innerHTML = '<span class="hint">— select text in transcript to mark clips —</span>';
+    return;
+  }
+
+  container.innerHTML = clips.map(c => {
+    const dur = formatDur(c.end - c.start);
+    const isCut = cutIds.has(c.id);
+    const preview = c.text.length > 25 ? c.text.slice(0, 25) + '…' : c.text;
+    return `<div class="clip-item">
+      <span class="clip-num">${c.id.replace('clip_','')}</span>
+      <span class="clip-text-preview" title="${c.text}">${preview}</span>
+      <span class="clip-dur">${dur}</span>
+      ${isCut ? '<span style="color:var(--green);font-size:10px">✓</span>' : ''}
+      <span class="clip-x" onclick="removeClip('${c.id}','interview')">×</span>
+    </div>`;
+  }).join('');
+}
+
+function renderNarrClipsList() {
+  const container = document.getElementById('narr-clips-list');
+  const clips = state.narr_text_clips || [];
+  const cutNames = new Set((state.narration || []).map(n => n.name));
+
+  if (clips.length === 0) { container.innerHTML = ''; return; }
+
+  container.innerHTML = clips.map(c => {
+    const dur = formatDur(c.end - c.start);
+    const isCut = cutNames.has(c.id + '.wav');
+    const preview = c.text.length > 25 ? c.text.slice(0, 25) + '…' : c.text;
+    return `<div class="clip-item">
+      <span class="clip-num" style="color:var(--blue)">${c.id.replace('narr_','')}</span>
+      <span class="clip-text-preview" title="${c.text}">${preview}</span>
+      <span class="clip-dur">${dur}</span>
+      ${isCut ? '<span style="color:var(--blue);font-size:10px">✓</span>' : ''}
+      <span class="clip-x" onclick="removeClip('${c.id}','narration')">×</span>
+    </div>`;
+  }).join('');
+  container.innerHTML += '<br>';
+}
+
+async function removeClip(id, source) {
+  await fetch('/remove_clip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, source })
+  });
+  const res = await fetch('/state');
+  state = await res.json();
+  renderTranscript();
+  renderNarrationPane();
+  renderClipsList();
+  renderNarrClipsList();
+  renderAssemblyPane();
+}
+
+// ── CUT CLIPS ──
+async function cutClips() {
+  setStatus('working', 'cutting clips…');
+  const res = await fetch('/cut_clips', { method: 'POST' });
+  const data = await res.json();
+  if (data.error) { setStatus('error', data.error); return; }
+  startProgressPolling();
+  pollUntilStatus('clips_ready', () => {
+    stopProgressPolling();
+    setStatus('done', 'clips cut');
+    fetch('/state').then(r => r.json()).then(s => { state = s; renderClipsList(); renderAssemblyPane(); renderPhaseButtons(); updatePhaseBar(state.phase || 1); });
+  });
+}
+
+// ── NARRATION ──
+async function importScript(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  setStatus('working', 'importing script…');
+  const res = await fetch('/import_script', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (data.error) { setStatus('error', data.error); return; }
+  document.getElementById('script-text').value = data.text;
+  setStatus('done', 'script imported');
+}
+
+async function uploadNarrationAudio(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  const formData = new FormData();
+  formData.append('file', file);
+  setStatus('working', 'uploading narration…');
+  const res = await fetch('/upload_narration_audio', { method: 'POST', body: formData });
+  const data = await res.json();
+  if (data.error) { setStatus('error', data.error); return; }
+  document.getElementById('narr-file-info').style.display = '';
+  document.getElementById('narr-file-info').textContent = '📎 ' + data.filename;
+  document.getElementById('transcribe-narr-btn').style.display = '';
+  document.getElementById('narr-upload-btn').textContent = '↻ replace narration audio';
+  setStatus('done', 'narration uploaded — add script then transcribe');
+}
+
+async function transcribeNarration() {
+  const script = document.getElementById('script-text').value.trim();
+  setStatus('working', 'transcribing narration…');
+  await fetch('/process_narration', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ script })
+  });
+  startProgressPolling();
+  pollUntilStatus('narration_ready', () => {
+    stopProgressPolling();
+    setStatus('done', 'narration transcribed — select text to mark clips');
+    document.getElementById('transcribe-narr-btn').style.display = 'none';
+    fetch('/state').then(r => r.json()).then(s => {
+      state = s;
+      renderNarrationPane();
+      renderNarrClipsList();
+      renderPhaseButtons();
+      updatePhaseBar(state.phase || 1);
+    });
+  });
+}
+
+async function cutNarration() {
+  setStatus('working', 'cutting narration…');
+  const res = await fetch('/cut_narration', { method: 'POST' });
+  const data = await res.json();
+  if (data.error) { setStatus('error', data.error); return; }
+  startProgressPolling();
+  pollUntilStatus('narration_cut', () => {
+    stopProgressPolling();
+    setStatus('done', 'narration clips cut');
+    fetch('/state').then(r => r.json()).then(s => {
+      state = s;
+      renderNarrClipsList();
+      renderAssemblyPane();
+      renderPhaseButtons();
+      updatePhaseBar(state.phase || 1);
+    });
+  });
+}
+
+// ── ASSEMBLY (drag and drop) ──
+function renderAssemblyPane() {
+  const clips = state.clips || [];
+  const narr = state.narration || [];
+
+  const clipsSrc = document.getElementById('asm-clips-source');
+  const narrSrc = document.getElementById('asm-narr-source');
+  if (!clipsSrc || !narrSrc) return;
+
+  clipsSrc.innerHTML = clips.map(c =>
+    `<div class="asm-chip chip-clip" draggable="true" data-type="clip" data-id="${c.id}">${c.id}</div>`
+  ).join('') || '<span style="font-size:10px;color:var(--text3)">cut clips first</span>';
+
+  narrSrc.innerHTML = narr.map(n =>
+    `<div class="asm-chip chip-narr" draggable="true" data-type="narration" data-file="${n.name}">${n.name.replace('.wav','')}</div>`
+  ).join('') || '<span style="font-size:10px;color:var(--text3)">no narration clips</span>';
+
+  renderTimeline();
+  initDragAndDrop();
+}
+
+function renderTimeline() {
+  const tl = document.getElementById('asm-timeline');
+  tl.innerHTML = assemblyOrder.map((item, i) => {
+    const label = item.type === 'narration' ? (item.file || '').replace('.wav','') : item.id;
+    const cls = item.type === 'narration' ? 'tl-narr' : 'tl-clip';
+    return `<div class="asm-tl-item ${cls}" draggable="true" data-index="${i}">
+      ${label} <span class="asm-x" onclick="event.stopPropagation();removeFromAssembly(${i})">×</span>
+    </div>`;
+  }).join('');
+
+  // Mark source chips that are already used in the timeline
+  const usedClips = new Set(assemblyOrder.filter(a => a.type === 'clip').map(a => a.id));
+  const usedNarr = new Set(assemblyOrder.filter(a => a.type === 'narration').map(a => a.file));
+  document.querySelectorAll('.asm-chip').forEach(chip => {
+    const isUsed = (chip.dataset.type === 'clip' && usedClips.has(chip.dataset.id))
+                || (chip.dataset.type === 'narration' && usedNarr.has(chip.dataset.file));
+    chip.classList.toggle('used', isUsed);
+  });
+
+  initDragAndDrop();
+}
+
+function initDragAndDrop() {
+  document.querySelectorAll('.asm-chip[draggable]').forEach(chip => {
+    chip.ondragstart = e => {
+      e.dataTransfer.setData('text/plain', JSON.stringify({ source: 'chip', type: chip.dataset.type, id: chip.dataset.id || null, file: chip.dataset.file || null }));
+      chip.classList.add('dragging');
+    };
+    chip.ondragend = () => chip.classList.remove('dragging');
+  });
+
+  document.querySelectorAll('.asm-tl-item[draggable]').forEach(item => {
+    item.ondragstart = e => {
+      e.dataTransfer.setData('text/plain', JSON.stringify({ source: 'timeline', index: parseInt(item.dataset.index) }));
+      item.classList.add('dragging');
+    };
+    item.ondragend = () => item.classList.remove('dragging');
+    item.ondragover = e => {
+      e.preventDefault();
+      const rect = item.getBoundingClientRect();
+      const mid = rect.left + rect.width / 2;
+      item.classList.remove('drag-over-left', 'drag-over-right');
+      item.classList.add(e.clientX < mid ? 'drag-over-right' : 'drag-over-left');
+    };
+    item.ondragleave = () => item.classList.remove('drag-over-left', 'drag-over-right');
+    item.ondrop = e => {
+      e.preventDefault();
+      item.classList.remove('drag-over-left', 'drag-over-right');
+      const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+      const targetIdx = parseInt(item.dataset.index);
+      const rect = item.getBoundingClientRect();
+      const insertIdx = e.clientX >= rect.left + rect.width / 2 ? targetIdx + 1 : targetIdx;
+      if (data.source === 'timeline') {
+        const [moved] = assemblyOrder.splice(data.index, 1);
+        assemblyOrder.splice(data.index < insertIdx ? insertIdx - 1 : insertIdx, 0, moved);
+      } else {
+        assemblyOrder.splice(insertIdx, 0, data.type === 'narration' ? { type: 'narration', file: data.file } : { type: 'clip', id: data.id });
+      }
+      renderTimeline();
+    };
+  });
+
+  const tl = document.getElementById('asm-timeline');
+  tl.ondragover = e => { e.preventDefault(); tl.classList.add('drag-over'); };
+  tl.ondragleave = e => { if (e.target === tl) tl.classList.remove('drag-over'); };
+  tl.ondrop = e => {
+    e.preventDefault(); tl.classList.remove('drag-over');
+    if (e.target !== tl && !e.target.classList.contains('asm-timeline')) return;
+    const data = JSON.parse(e.dataTransfer.getData('text/plain'));
+    if (data.source === 'timeline') { const [m] = assemblyOrder.splice(data.index, 1); assemblyOrder.push(m); }
+    else { assemblyOrder.push(data.type === 'narration' ? { type: 'narration', file: data.file } : { type: 'clip', id: data.id }); }
+    renderTimeline();
+  };
+}
+
+function removeFromAssembly(i) { assemblyOrder.splice(i, 1); renderTimeline(); }
+function clearAssembly() { assemblyOrder = []; renderTimeline(); }
+
+async function assembleRoughCut() {
+  if (assemblyOrder.length === 0) { alert('Drag items to the timeline first'); return; }
+  setStatus('working', 'assembling…');
+  const res = await fetch('/assemble', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: assemblyOrder, output_name: 'rough_cut.wav' })
+  });
+  const data = await res.json();
+  if (data.error) { setStatus('error', data.error); return; }
+  startProgressPolling();
+  pollUntilStatus('assembled', () => {
+    stopProgressPolling();
+    setStatus('done', 'rough cut ready!');
+    renderPhaseButtons();
+    window.location.href = '/download/rough_cut.wav';
+  });
+}
+
+// ── PROGRESS BAR ──
+function startProgressPolling() {
+  operationStartTime = Date.now();
+  const bar = document.getElementById('progress-bar');
+  const fill = document.getElementById('progress-fill');
+  bar.classList.add('active');
+  fill.className = 'progress-fill indeterminate';
+  fill.style.width = '0%';
+  if (progressInterval) clearInterval(progressInterval);
+  progressInterval = setInterval(async () => {
+    try {
+      const res = await fetch('/progress');
+      const p = await res.json();
+      const msgEl = document.getElementById('progress-msg');
+      const elapsedEl = document.getElementById('progress-elapsed');
+      const elapsed = Math.floor((Date.now() - operationStartTime) / 1000);
+      const min = Math.floor(elapsed / 60), sec = elapsed % 60;
+      elapsedEl.textContent = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+      if (p.phase && p.total > 0) {
+        fill.className = 'progress-fill';
+        fill.style.width = Math.round((p.current / p.total) * 100) + '%';
+        msgEl.textContent = p.message;
+      } else if (p.phase) {
+        fill.className = 'progress-fill indeterminate';
+        msgEl.textContent = p.message || 'working…';
+      }
+    } catch(e) {}
+  }, 500);
+}
+
+function stopProgressPolling() {
+  if (progressInterval) { clearInterval(progressInterval); progressInterval = null; }
+  const bar = document.getElementById('progress-bar');
+  const fill = document.getElementById('progress-fill');
+  fill.className = 'progress-fill'; fill.style.width = '100%';
+  setTimeout(() => { bar.classList.remove('active'); fill.style.width = '0%'; }, 1500);
+  operationStartTime = null;
+}
+
+function pollUntilStatus(target, callback) {
+  const iv = setInterval(async () => {
+    const res = await fetch('/status');
+    const s = await res.json();
+    if (s.status === target) { clearInterval(iv); callback(); }
+    else if (s.status && s.status.startsWith('error')) { clearInterval(iv); stopProgressPolling(); setStatus('error', s.status); }
+  }, 500);
+}
+
+// ── HELPERS ──
+function setStatus(type, msg) {
+  const pill = document.getElementById('status-pill');
+  pill.className = 'status-pill status-' + type;
+  pill.textContent = msg;
+}
+function formatTime(secs) {
+  const m = Math.floor(secs / 60), s = Math.floor(secs % 60);
+  return m + ':' + String(s).padStart(2,'0');
+}
+function formatDur(secs) {
+  const m = Math.floor(secs / 60), s = Math.floor(secs % 60);
+  return m > 0 ? m + 'm' + String(s).padStart(2,'0') + 's' : s + 's';
+}
+// --- Project management ---
+
+function updateProjectName() {
+  const el = document.getElementById('project-name');
+  const name = state.project_name || 'untitled';
+  el.textContent = name;
+  el.title = name === 'untitled' ? 'Click to name this project' : 'Click to rename';
+}
+
+function renameProject() {
+  const current = state.project_name || '';
+  const name = prompt('Project name:', current);
+  if (name === null) return;
+  const trimmed = name.trim();
+  if (!trimmed) return;
+  state.project_name = trimmed;
+  updateProjectName();
+  // Persist name to state.json
+  fetch('/save_project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: trimmed })
+  });
+}
+
+async function saveCurrentProject() {
+  let name = state.project_name;
+  if (!name || name === 'untitled') {
+    name = prompt('Name this project:');
+    if (!name || !name.trim()) return;
+    name = name.trim();
+  }
+  const res = await fetch('/save_project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  state.project_name = data.name;
+  updateProjectName();
+  loadProjectList();
+}
+
+// Alias for the phase-3 button
+async function saveProject() { return saveCurrentProject(); }
+
+async function newProject() {
+  const hasWork = state.transcript && state.transcript.length > 0;
+  if (hasWork) {
+    const choice = confirm('Save current project before starting a new one?');
+    if (choice) {
+      await saveCurrentProject();
+    } else {
+      if (!confirm('Start a new project? Unsaved work will be lost.')) return;
+    }
+  }
+  await fetch('/reset', { method: 'POST' });
+  window.location.reload();
+}
+
+// --- Projects drawer ---
+
+function toggleProjectsDrawer() {
+  const overlay = document.getElementById('projects-overlay');
+  overlay.classList.toggle('open');
+  if (overlay.classList.contains('open')) loadProjectList();
+}
+
+function closeProjectsDrawer(event) {
+  if (event && event.target !== event.currentTarget) return;
+  document.getElementById('projects-overlay').classList.remove('open');
+}
+
+async function loadProjectList() {
+  const res = await fetch('/projects');
+  const data = await res.json();
+  const body = document.getElementById('drawer-body');
+  if (!body) return;
+
+  if (data.projects.length === 0) {
+    body.innerHTML = '<div class="drawer-empty">No saved projects yet</div>';
+    return;
+  }
+
+  const currentName = state.project_name || '';
+  body.innerHTML = data.projects.map(function(name) {
+    const isActive = name === currentName;
+    const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    return '<div class="drawer-project' + (isActive ? ' active' : '') + '" onclick="loadProject(\'' + escaped + '\')">'
+      + '<span class="drawer-project-name">' + name + '</span>'
+      + (isActive ? '<span class="drawer-project-meta">current</span>' : '')
+      + '</div>';
+  }).join('');
+}
+
+async function loadProject(name) {
+  if (!confirm('Load project "' + name + '"? Current session will be replaced.')) return;
+  const res = await fetch('/load_project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  window.location.reload();
+}
+
+init();
+</script>
+</body>
+</html>

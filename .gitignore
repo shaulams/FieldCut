@@ -1,0 +1,32 @@
+# Environment & secrets
+.env
+.venv/
+__pycache__/
+
+# Audio files (user data, not part of the project)
+uploads/
+clips/
+narration/
+output/
+projects/
+
+# Session state
+state.json
+
+# macOS
+.DS_Store
+
+# Debug logs
+*.log
+firebase-debug.log
+
+# IDE
+.vscode/
+.idea/
+
+# Internal dev notes
+REVIEW.md
+docs/plans/
+
+# Misc
+{static,templates,clips,output}

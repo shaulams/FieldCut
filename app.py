@@ -12,12 +12,24 @@ except ImportError:
 from openai import OpenAI
 
 app = Flask(__name__)
-app.config['UPLOAD_FOLDER'] = 'uploads'
-app.config['CLIPS_FOLDER'] = 'clips'
-app.config['OUTPUT_FOLDER'] = 'output'
 
-for folder in ['uploads', 'clips', 'output', 'narration', 'projects']:
-    os.makedirs(folder, exist_ok=True)
+# ─── PROJECT DIRECTORY ────────────────────────────────────
+_active_project_dir = os.path.join("projects", "_session")
+
+def set_project_dir(path):
+    global _active_project_dir
+    _active_project_dir = path
+    for sub in ['uploads', 'clips', 'narration', 'output']:
+        os.makedirs(os.path.join(path, sub), exist_ok=True)
+
+def pdir(folder=""):
+    """Return path to a subfolder in the active project directory, creating it if needed."""
+    path = os.path.join(_active_project_dir, folder) if folder else _active_project_dir
+    os.makedirs(path, exist_ok=True)
+    return path
+
+os.makedirs("projects", exist_ok=True)
+set_project_dir(_active_project_dir)
 
 api_key = os.environ.get("OPENAI_API_KEY")
 client = OpenAI(api_key=api_key) if api_key else None
@@ -31,15 +43,20 @@ except (subprocess.CalledProcessError, FileNotFoundError):
     print("⚠️  ffmpeg not found. Install it with: brew install ffmpeg (Mac) or apt install ffmpeg (Linux)")
     print("   Audio cutting and assembly will not work without ffmpeg.")
 
-# In-memory state (persisted to state.json)
-STATE_FILE = "state.json"
-
+# In-memory state (persisted per-project)
 # Progress tracking for async operations
 progress = {"phase": None, "current": 0, "total": 0, "message": ""}
 
+def state_file():
+    return os.path.join(_active_project_dir, "state.json")
+
 def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE) as f:
+    sf = state_file()
+    # Migrate legacy root-level state.json on first run
+    if not os.path.exists(sf) and os.path.exists("state.json"):
+        shutil.copy2("state.json", sf)
+    if os.path.exists(sf):
+        with open(sf) as f:
             state = json.load(f)
         # Auto-detect phase for legacy projects that predate the phase system
         if "phase" not in state:
@@ -56,7 +73,7 @@ def load_state():
             "narration": [], "assembly": [], "source_file": None, "phase": 1}
 
 def save_state(state):
-    with open(STATE_FILE, "w") as f:
+    with open(state_file(), "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 def merge_segments(raw_segments, pause_threshold=1.0, sentence_gap=0.4, max_duration=45):
@@ -105,7 +122,7 @@ def transcribe():
 
     f = request.files["file"]
     filename = f.filename
-    filepath = os.path.join("uploads", filename)
+    filepath = os.path.join(pdir("uploads"), filename)
     f.save(filepath)
     whisper_lang = request.form.get("language", "he")
     if whisper_lang == "auto":
@@ -333,7 +350,7 @@ def cut_clips():
         cut_files = []
         for i, clip in enumerate(clips):
             progress.update(current=i, message=f"cutting {clip['id']}… ({i+1}/{len(clips)})")
-            out_path = os.path.join("clips", f"{clip['id']}.wav")
+            out_path = os.path.join(pdir("clips"), f"{clip['id']}.wav")
             duration = clip["end"] - clip["start"]
             cmd = [
                 "ffmpeg", "-y",
@@ -392,7 +409,7 @@ def cut_clips():
                 set_rtl_doc(tp)
                 doc.add_paragraph("")
 
-            doc.save(os.path.join("output", "transcript.docx"))
+            doc.save(os.path.join(pdir("output"), "transcript.docx"))
         except Exception:
             pass  # Word doc generation is best-effort
 
@@ -453,7 +470,7 @@ def export_transcript():
 
         doc.add_paragraph("")  # spacer
 
-    out_path = os.path.join("output", "transcript.docx")
+    out_path = os.path.join(pdir("output"), "transcript.docx")
     doc.save(out_path)
     return send_file(out_path, as_attachment=True, download_name="transcript.docx")
 
@@ -464,7 +481,7 @@ def upload_narration_audio():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
     f = request.files["file"]
-    filepath = os.path.join("narration", f.filename)
+    filepath = os.path.join(pdir("narration"), f.filename)
     f.save(filepath)
     state = load_state()
     state["narration_source"] = filepath
@@ -597,7 +614,7 @@ def cut_narration():
         narration_files = []
         for i, clip in enumerate(clips):
             clip_name = f"{clip['id']}.wav"
-            out_path = os.path.join("narration", clip_name)
+            out_path = os.path.join(pdir("narration"), clip_name)
             duration = clip["end"] - clip["start"]
             progress.update(current=i, message=f"cutting {clip['id']}… ({i+1}/{len(clips)})")
             cmd = [
@@ -630,10 +647,11 @@ def cut_narration():
 
 @app.route("/assemble", methods=["POST"])
 def assemble():
+    import datetime as _dt
     data = request.json
     assembly_order = data.get("order", [])
-    output_name = data.get("output_name", "rough_cut.wav")
     gap_seconds = max(0.0, min(5.0, float(data.get("gap", 1.0))))
+    output_name = "rough_cut_{}.wav".format(_dt.datetime.now().strftime("%Y%m%d_%H%M%S"))
 
     state = load_state()
     clips_map = {c["id"]: c["path"] for c in state.get("clips", [])}
@@ -660,10 +678,10 @@ def assemble():
         try:
             progress.update(phase="assemble", current=0, total=len(file_paths), message="assembling rough cut…")
 
-            output_path = os.path.join("output", output_name)
+            output_path = os.path.join(pdir("output"), output_name)
 
             # Generate silence file for gaps between clips
-            silence_path = os.path.join("output", "_silence.wav")
+            silence_path = os.path.join(pdir("output"), "_silence.wav")
             if gap_seconds > 0:
                 subprocess.run([
                     "ffmpeg", "-y", "-f", "lavfi", "-t", str(gap_seconds),
@@ -698,6 +716,8 @@ def assemble():
                 progress.update(phase=None, message="")
             else:
                 st["status"] = "assembled"
+                st["output_file"] = output_path
+                st["output_filename"] = output_name
                 save_state(st)
                 progress.update(phase=None, current=len(file_paths), total=len(file_paths), message="done")
         except Exception as e:
@@ -788,7 +808,7 @@ def export_paper_edit():
 
         doc.add_paragraph()  # spacer
 
-    out_path = os.path.join("output", "paper_edit.docx")
+    out_path = os.path.join(pdir("output"), "paper_edit.docx")
     doc.save(out_path)
     return send_file(out_path, as_attachment=True, download_name="paper_edit.docx")
 
@@ -881,7 +901,17 @@ def stream_audio(filepath):
 
 @app.route("/download/<path:filename>")
 def download(filename):
-    return send_file(os.path.join("output", filename), as_attachment=True)
+    return send_file(os.path.join(pdir("output"), filename), as_attachment=True)
+
+@app.route("/download_output")
+def download_output():
+    """Download the most recent assembled output for the active project."""
+    state = load_state()
+    output_file = state.get("output_file")
+    output_name = state.get("output_filename", "rough_cut.wav")
+    if not output_file or not os.path.exists(output_file):
+        return jsonify({"error": "No output file found"}), 404
+    return send_file(output_file, as_attachment=True, download_name=output_name)
 
 @app.route("/set_phase", methods=["POST"])
 def set_phase():
@@ -908,51 +938,68 @@ def save_project():
     if not safe_name:
         return jsonify({"error": "Invalid project name"}), 400
 
-    project_dir = os.path.join("projects", safe_name)
-    os.makedirs(project_dir, exist_ok=True)
+    target_dir = os.path.join("projects", safe_name)
 
-    # Copy clips/, narration/, output/ folders into the project dir
-    for folder in ['clips', 'narration', 'output']:
-        dest = os.path.join(project_dir, folder)
-        if os.path.exists(dest):
-            shutil.rmtree(dest)
-        if os.path.exists(folder):
-            shutil.copytree(folder, dest)
+    if _active_project_dir == target_dir:
+        # Already in the right place — just update project_name in state
+        pass
+    elif os.path.basename(_active_project_dir) == "_session":
+        # Rename _session → named project
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
+        shutil.copytree(_active_project_dir, target_dir)
+        set_project_dir(target_dir)
+    else:
+        # Save-as from one project to another name
+        if os.path.exists(target_dir):
+            shutil.rmtree(target_dir)
+        shutil.copytree(_active_project_dir, target_dir)
+        set_project_dir(target_dir)
 
-    # Copy source audio file from uploads/ if it exists
     state = load_state()
-    source_file = state.get("source_file")
-    if source_file and os.path.exists(source_file):
-        uploads_dest = os.path.join(project_dir, "uploads")
-        os.makedirs(uploads_dest, exist_ok=True)
-        shutil.copy2(source_file, os.path.join(uploads_dest, os.path.basename(source_file)))
-
-    # Copy narration source file if it exists
-    narration_source = state.get("narration_source")
-    if narration_source and os.path.exists(narration_source):
-        narr_dest_dir = os.path.join(project_dir, "narration")
-        os.makedirs(narr_dest_dir, exist_ok=True)
-        shutil.copy2(narration_source, os.path.join(narr_dest_dir, os.path.basename(narration_source)))
-
-    # Save state.json with project_name field
     state["project_name"] = safe_name
-    project_state_path = os.path.join(project_dir, "state.json")
-    with open(project_state_path, "w") as f:
-        json.dump(state, f, ensure_ascii=False, indent=2)
-
+    save_state(state)
     return jsonify({"ok": True, "name": safe_name})
 
 
 @app.route("/projects")
 def list_projects():
     projects = []
-    projects_dir = "projects"
-    if os.path.exists(projects_dir):
-        for entry in sorted(os.listdir(projects_dir)):
-            entry_path = os.path.join(projects_dir, entry)
+    if os.path.exists("projects"):
+        for entry in sorted(os.listdir("projects")):
+            if entry == "_session":
+                continue
+            entry_path = os.path.join("projects", entry)
             if os.path.isdir(entry_path) and os.path.exists(os.path.join(entry_path, "state.json")):
                 projects.append(entry)
     return jsonify({"projects": projects})
+
+
+def _migrate_paths(state, project_dir):
+    """Rewrite legacy root-relative paths to project-scoped paths."""
+    prefix_map = {
+        "uploads/": os.path.join(project_dir, "uploads") + os.sep,
+        "clips/": os.path.join(project_dir, "clips") + os.sep,
+        "narration/": os.path.join(project_dir, "narration") + os.sep,
+        "output/": os.path.join(project_dir, "output") + os.sep,
+    }
+    def fix(path):
+        if not path:
+            return path
+        for old_prefix, new_prefix in prefix_map.items():
+            if path.startswith(old_prefix):
+                return new_prefix + path[len(old_prefix):]
+        return path
+
+    state["source_file"] = fix(state.get("source_file"))
+    state["narration_source"] = fix(state.get("narration_source"))
+    for c in state.get("clips", []):
+        c["path"] = fix(c.get("path", ""))
+    for n in state.get("narration", []):
+        n["path"] = fix(n.get("path", ""))
+    if "output_file" in state:
+        state["output_file"] = fix(state["output_file"])
+    return state
 
 
 @app.route("/load_project", methods=["POST"])
@@ -963,29 +1010,12 @@ def load_project():
         return jsonify({"error": "Project name is required"}), 400
 
     project_dir = os.path.join("projects", name)
-    project_state_path = os.path.join(project_dir, "state.json")
-
-    if not os.path.exists(project_state_path):
+    if not os.path.exists(os.path.join(project_dir, "state.json")):
         return jsonify({"error": "Project not found"}), 404
 
-    # Clear current session folders
-    for folder in ['clips', 'narration', 'output', 'uploads']:
-        if os.path.exists(folder):
-            shutil.rmtree(folder)
-        os.makedirs(folder, exist_ok=True)
-
-    # Copy project folders back
-    for folder in ['clips', 'narration', 'output', 'uploads']:
-        src = os.path.join(project_dir, folder)
-        if os.path.exists(src):
-            # Remove the empty dir we just created, then copy
-            shutil.rmtree(folder)
-            shutil.copytree(src, folder)
-
-    # Load the project's state.json into the active state.json
-    with open(project_state_path) as f:
-        state = json.load(f)
-
+    set_project_dir(project_dir)
+    state = load_state()
+    state = _migrate_paths(state, project_dir)
     save_state(state)
     return jsonify({"ok": True, "state": state})
 
@@ -1002,13 +1032,18 @@ def delete_project():
         return jsonify({"error": "Project not found"}), 404
 
     shutil.rmtree(project_dir)
+    # If we just deleted the active project, switch to a fresh session
+    if _active_project_dir == project_dir:
+        set_project_dir(os.path.join("projects", "_session"))
     return jsonify({"ok": True})
 
 
 @app.route("/reset", methods=["POST"])
 def reset():
-    if os.path.exists(STATE_FILE):
-        os.unlink(STATE_FILE)
+    set_project_dir(os.path.join("projects", "_session"))
+    sf = state_file()
+    if os.path.exists(sf):
+        os.unlink(sf)
     return jsonify({"ok": True})
 
 if __name__ == "__main__":

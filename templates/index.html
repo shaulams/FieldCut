@@ -440,8 +440,9 @@
     </div>
 
     <div id="phase3-done-actions" style="display:none;margin-top:12px;gap:8px;flex-direction:column">
+      <a id="download-output-btn" class="btn btn-primary" href="/download_output" style="text-align:center;text-decoration:none" data-i18n="download_output"></a>
       <div style="display:flex;gap:8px">
-        <button class="btn btn-primary" onclick="saveProject()" style="flex:1" data-i18n="save_project"></button>
+        <button class="btn" onclick="saveProject()" style="flex:1" data-i18n="save_project"></button>
         <button class="btn" onclick="newProject()" style="flex:1" data-i18n="new_project"></button>
       </div>
       <button class="btn" onclick="exportPaperEdit()" data-i18n="export_paper_edit"></button>
@@ -1531,8 +1532,9 @@ async function assembleRoughCut() {
   pollUntilStatus('assembled', () => {
     stopProgressPolling();
     setStatus('done', t('rough_cut_ready'));
+    const res2 = await fetch('/state');
+    state = await res2.json();
     renderPhaseButtons();
-    window.location.href = '/download/rough_cut.wav';
   });
 }
 

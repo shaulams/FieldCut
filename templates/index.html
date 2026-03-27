@@ -990,6 +990,8 @@ let waveformPlayStart = 0;
 let playheadAnimFrame = null;
 let silenceRegions = [];
 let wordSpanIndex = [];
+let waveformZoom = 1;
+let waveformOffset = 0; // left-edge time of visible window (seconds)
 let lastHoverWordSpan = null;
 
 async function loadWaveform(sourceFile) {
@@ -1002,6 +1004,8 @@ async function loadWaveform(sourceFile) {
   waveformData = data.points;
   waveformDuration = data.duration;
   waveformSourceFile = sourceFile;
+  waveformZoom = 1;
+  waveformOffset = 0;
   computeSilences();
   document.getElementById('waveform-bar').classList.add('visible');
   drawWaveform();
@@ -1055,12 +1059,27 @@ function scrollTranscriptToTime(t) {
   setTimeout(() => span.classList.remove('waveform-flash'), 900);
 }
 
+function waveformVisWindow() {
+  const visDur = waveformDuration / waveformZoom;
+  const start = Math.max(0, Math.min(waveformDuration - visDur, waveformOffset));
+  return { start, end: start + visDur, dur: visDur };
+}
+function tToX(t, W) {
+  const { start, dur } = waveformVisWindow();
+  return ((t - start) / dur) * W;
+}
+function xToT(x, W) {
+  const { start, dur } = waveformVisWindow();
+  return start + (x / W) * dur;
+}
+
 function drawWaveform() {
   const canvas = document.getElementById('waveform-canvas');
   if (!canvas || !waveformData) return;
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.offsetWidth;
   const H = 72;
+  const SB = 4; // scrollbar strip height at bottom
   canvas.width = W * dpr;
   canvas.height = H * dpr;
   const ctx = canvas.getContext('2d');
@@ -1068,66 +1087,79 @@ function drawWaveform() {
 
   const cs = getComputedStyle(document.documentElement);
   const textColor = cs.getPropertyValue('--text').trim();
-  ctx.fillStyle = cs.getPropertyValue('--bg2').trim();
+  const bg2 = cs.getPropertyValue('--bg2').trim();
+  const text3 = cs.getPropertyValue('--text3').trim() || '#888';
+  ctx.fillStyle = bg2;
   ctx.fillRect(0, 0, W, H);
 
-  // Silence markers — shape-based: small downward tick at bottom of canvas
-  silenceRegions.forEach(s => {
-    const xMid = ((s.start + s.end) / 2 / waveformDuration) * W;
-    ctx.fillStyle = cs.getPropertyValue('--text3').trim() || '#888';
-    ctx.beginPath();
-    ctx.moveTo(xMid - 3, H - 8);
-    ctx.lineTo(xMid + 3, H - 8);
-    ctx.lineTo(xMid, H - 3);
-    ctx.closePath();
-    ctx.fill();
-  });
+  const { start: visStart, end: visEnd, dur: visDur } = waveformVisWindow();
 
-  // Clip regions + fixed-position number badges
-  ctx.font = `bold 10px monospace`;
-  ctx.textBaseline = 'middle';
+  // Clip regions + number badges
   (state.text_clips || []).forEach(c => {
-    const x1 = (c.start / waveformDuration) * W;
-    const x2 = (c.end / waveformDuration) * W;
+    if (c.end < visStart || c.start > visEnd) return;
+    const x1 = tToX(c.start, W);
+    const x2 = tToX(c.end, W);
     const rw = x2 - x1;
     ctx.fillStyle = 'rgba(29,158,117,0.18)';
-    ctx.fillRect(x1, 0, rw, H);
+    ctx.fillRect(x1, 0, rw, H - SB);
     ctx.strokeStyle = 'rgba(29,158,117,0.7)';
     ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
-    // Badge: always visible pill at top of region start
-    const label = c.id.replace('clip_', '');
+    ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H - SB); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H - SB); ctx.stroke();
+
+    // Badge — centered in the visible slice of the clip
+    const label = String(parseInt(c.id.replace('clip_', ''), 10));
+    ctx.font = `bold 13px monospace`;
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'center';
+    const visX1 = Math.max(0, x1);
+    const visX2 = Math.min(W, x2);
+    if (visX2 - visX1 < 6) { ctx.textAlign = 'left'; return; }
+    const cx = (visX1 + visX2) / 2;
+    const cy = (H - SB) / 2;
     const tw = ctx.measureText(label).width;
-    const bx = x1 + 3, by = 4, bw2 = tw + 6, bh2 = 14;
-    ctx.fillStyle = 'rgba(29,158,117,0.85)';
-    ctx.beginPath();
-    ctx.roundRect(bx, by, bw2, bh2, 3);
-    ctx.fill();
+    const bw2 = tw + 12, bh2 = 20;
+    ctx.fillStyle = 'rgba(22,120,90,0.92)';
+    ctx.beginPath(); ctx.roundRect(cx - bw2 / 2, cy - bh2 / 2, bw2, bh2, 5); ctx.fill();
     ctx.fillStyle = '#fff';
-    ctx.fillText(label, bx + 3, by + bh2 / 2);
+    ctx.fillText(label, cx, cy);
+    ctx.textAlign = 'left';
   });
 
-  // Waveform bars
+  // Waveform bars — only render visible range for performance
   const pts = waveformData;
-  const bw = W / pts.length;
-  const cy = H / 2;
-  ctx.fillStyle = cs.getPropertyValue('--text3').trim() || '#888';
-  pts.forEach((v, i) => {
-    const bh = Math.max(1, v * H * 0.88);
-    ctx.fillRect(i * bw, cy - bh / 2, Math.max(0.8, bw - 0.5), bh);
-  });
+  const startPt = Math.max(0, Math.floor(visStart / waveformDuration * pts.length) - 1);
+  const endPt = Math.min(pts.length, Math.ceil(visEnd / waveformDuration * pts.length) + 1);
+  const bw = W / ((endPt - startPt) || 1) * ((endPt - startPt) / pts.length * waveformZoom);
+  const cy = (H - SB) / 2;
+  ctx.fillStyle = text3;
+  for (let i = startPt; i < endPt; i++) {
+    const t = (i / pts.length) * waveformDuration;
+    const x = tToX(t, W);
+    const bh = Math.max(1, pts[i] * (H - SB) * 0.88);
+    ctx.fillRect(x, cy - bh / 2, Math.max(0.8, bw - 0.5), bh);
+  }
 
-  // Playhead — use --text color so it's visible in both light and dark mode
-  if (waveformPlayhead > 0 && waveformDuration > 0) {
-    const px = (waveformPlayhead / waveformDuration) * W;
+  // Playhead
+  if (waveformPlayhead >= visStart && waveformPlayhead <= visEnd) {
+    const px = tToX(waveformPlayhead, W);
     ctx.strokeStyle = textColor;
     ctx.globalAlpha = 0.7;
     ctx.lineWidth = 1.5;
-    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H - SB); ctx.stroke();
     ctx.fillStyle = textColor;
     ctx.beginPath(); ctx.moveTo(px - 4, 0); ctx.lineTo(px + 4, 0); ctx.lineTo(px, 7); ctx.closePath(); ctx.fill();
     ctx.globalAlpha = 1;
+  }
+
+  // Scrollbar (only when zoomed in)
+  if (waveformZoom > 1) {
+    ctx.fillStyle = cs.getPropertyValue('--border').trim() || '#333';
+    ctx.fillRect(0, H - SB, W, SB);
+    const thumbW = W / waveformZoom;
+    const thumbX = (visStart / waveformDuration) * W;
+    ctx.fillStyle = text3;
+    ctx.beginPath(); ctx.roundRect(thumbX, H - SB + 1, Math.max(20, thumbW), SB - 2, 2); ctx.fill();
   }
 }
 
@@ -1153,7 +1185,7 @@ function startPlayheadAnimation() {
 function waveformMouseDown(e) {
   if (!waveformDuration || !state.source_file) return;
   const rect = e.currentTarget.getBoundingClientRect();
-  const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
+  const t = xToT(e.clientX - rect.left, rect.width);
   waveformPlayhead = t;
   drawWaveform();
   playSnippet(state.source_file, t, Math.min(waveformDuration, t + 30));
@@ -1163,7 +1195,7 @@ function waveformMouseDown(e) {
 function waveformMouseMove(e) {
   if (!waveformDuration) return;
   const rect = e.currentTarget.getBoundingClientRect();
-  const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
+  const t = xToT(e.clientX - rect.left, rect.width);
   document.getElementById('waveform-time').textContent = formatTime(t);
   if (wordSpanIndex.length) {
     if (lastHoverWordSpan) lastHoverWordSpan.classList.remove('waveform-hover');
@@ -1177,6 +1209,33 @@ function waveformHoverEnd() {
   document.getElementById('waveform-time').textContent = '';
   if (lastHoverWordSpan) { lastHoverWordSpan.classList.remove('waveform-hover'); lastHoverWordSpan = null; }
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('waveform-bar').addEventListener('wheel', e => {
+    e.preventDefault();
+    if (!waveformData) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const absX = Math.abs(e.deltaX), absY = Math.abs(e.deltaY);
+
+    if (absX > absY) {
+      // Horizontal scroll → pan
+      if (waveformZoom <= 1) return;
+      const visDur = waveformDuration / waveformZoom;
+      waveformOffset += (e.deltaX / rect.width) * visDur;
+      waveformOffset = Math.max(0, Math.min(waveformDuration - visDur, waveformOffset));
+    } else {
+      // Vertical scroll → zoom (smooth, proportional to gesture speed)
+      const mouseRatio = (e.clientX - rect.left) / rect.width;
+      const mouseT = xToT(e.clientX - rect.left, rect.width);
+      const factor = Math.exp(-e.deltaY * 0.003);
+      waveformZoom = Math.max(1, Math.min(100, waveformZoom * factor));
+      const newVisDur = waveformDuration / waveformZoom;
+      waveformOffset = mouseT - mouseRatio * newVisDur;
+      waveformOffset = Math.max(0, Math.min(waveformDuration - newVisDur, waveformOffset));
+    }
+    drawWaveform();
+  }, { passive: false });
+});
 
 function toggleTrim(id, source) {
   stopClipPreview();

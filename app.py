@@ -52,9 +52,10 @@ def state_file():
 
 def load_state():
     sf = state_file()
-    # Migrate legacy root-level state.json on first run
+    # Migrate legacy root-level state.json once, then remove it so it can't re-appear after reset
     if not os.path.exists(sf) and os.path.exists("state.json"):
         shutil.copy2("state.json", sf)
+        os.rename("state.json", "state.json.migrated")
     if os.path.exists(sf):
         with open(sf) as f:
             state = json.load(f)

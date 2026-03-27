@@ -1693,16 +1693,9 @@ async function saveProject() { return saveCurrentProject(); }
 
 async function newProject() {
   const hasWork = state.transcript && state.transcript.length > 0;
-  if (hasWork) {
-    const choice = confirm(t('save_before_new'));
-    if (choice) {
-      await saveCurrentProject();
-    } else {
-      if (!confirm(t('unsaved_warning'))) return;
-    }
-  }
+  if (hasWork && !confirm(t('unsaved_warning'))) return;
   await fetch('/reset', { method: 'POST' });
-  window.location.reload();
+  window.location.href = '/';
 }
 
 // --- Projects drawer ---
@@ -1782,11 +1775,10 @@ async function duplicateProject(name) {
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
-  window.location.reload();
+  window.location.href = '/';
 }
 
 async function loadProject(name) {
-  if (!confirm(t('load_confirm', { name: name }))) return;
   const res = await fetch('/load_project', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1794,7 +1786,7 @@ async function loadProject(name) {
   });
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
-  window.location.reload();
+  window.location.href = '/';
 }
 
 async function deleteProject(name) {

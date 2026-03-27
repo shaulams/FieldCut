@@ -110,7 +110,9 @@ def index():
 
 @app.route("/state")
 def get_state():
-    return jsonify(load_state())
+    resp = jsonify(load_state())
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
 
 # ─── STEP 1: TRANSCRIBE ───────────────────────────────────
 
@@ -1007,10 +1009,20 @@ def save_project():
         pass
     elif os.path.basename(_active_project_dir) == "_session":
         # Rename _session → named project
-        if os.path.exists(target_dir):
-            shutil.rmtree(target_dir)
-        shutil.copytree(_active_project_dir, target_dir)
-        set_project_dir(target_dir)
+        session_state = load_state()
+        if not session_state.get("source_file"):
+            # Empty session — do not overwrite an existing named project with blank data
+            if os.path.exists(target_dir):
+                set_project_dir(target_dir)
+            else:
+                set_project_dir(target_dir)
+                empty = {"project_name": safe_name}
+                save_state(empty)
+        else:
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir)
+            shutil.copytree(_active_project_dir, target_dir)
+            set_project_dir(target_dir)
     else:
         # Save-as from one project to another name
         if os.path.exists(target_dir):
@@ -1159,6 +1171,9 @@ def reset():
     sf = state_file()
     if os.path.exists(sf):
         os.unlink(sf)
+    # Permanently consume legacy root state.json so it can never re-migrate after reset
+    if os.path.exists("state.json"):
+        os.rename("state.json", "state.json.migrated")
     return jsonify({"ok": True})
 
 if __name__ == "__main__":

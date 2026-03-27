@@ -789,9 +789,23 @@ def export_paper_edit():
     normal_pPr = normal_style._element.get_or_add_pPr()
     normal_pPr.append(OxmlElement('w:bidi'))
 
-    title = doc.add_heading(state.get("project_name", "תמלול סופי"), 0)
+    # Use a plain paragraph for the title (heading styles override RTL alignment)
+    title = doc.add_paragraph()
+    title_run = title.add_run(state.get("project_name", "תמלול סופי"))
+    title_run.bold = True
+    title_run.font.size = Pt(22)
+    title_run.font.name = 'David'
     title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     set_rtl(title)
+    # Bottom border under title
+    pBdr = OxmlElement('w:pBdr')
+    bottom = OxmlElement('w:bottom')
+    bottom.set(qn('w:val'), 'single')
+    bottom.set(qn('w:sz'), '6')
+    bottom.set(qn('w:space'), '1')
+    bottom.set(qn('w:color'), '1D9E75')
+    pBdr.append(bottom)
+    title._p.get_or_add_pPr().append(pBdr)
 
     for i, item in enumerate(assembly_order, 1):
         item_type = item.get("type")
@@ -830,9 +844,12 @@ def export_paper_edit():
 
         doc.add_paragraph()  # spacer
 
-    out_path = os.path.join(pdir("output"), "paper_edit.docx")
+    # Name the docx after the rough cut file (same timestamp)
+    rough_cut_name = state.get("output_filename", "rough_cut")
+    docx_name = rough_cut_name.replace(".wav", ".docx") if rough_cut_name.endswith(".wav") else "transcript.docx"
+    out_path = os.path.join(pdir("output"), docx_name)
     doc.save(out_path)
-    return send_file(out_path, as_attachment=True, download_name="paper_edit.docx")
+    return send_file(out_path, as_attachment=True, download_name=docx_name)
 
 
 # ─── AUDIO ────────────────────────────────────────────────

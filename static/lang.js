@@ -163,7 +163,7 @@ const LANGS = {
     clear: "נקה",
     save_project: "שמור פרויקט",
     gap_label: "הפסקה בין קליפים",
-    download_output: "⬇ הורד קובץ גמר",
+    download_output: "הורידו קובץ סופי ⬇",
     reassemble: "↺ הרכב מחדש",
     export_paper_edit: "ייצוא תמלול סופי (.docx)",
     paper_edit_ready: "תמלול סופי מוכן!",

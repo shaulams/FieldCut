@@ -239,7 +239,7 @@
   /* WAVEFORM */
   .waveform-bar { flex-shrink: 0; background: var(--bg2); border-bottom: 1px solid var(--border); position: relative; cursor: crosshair; display: none; user-select: none; }
   .waveform-bar.visible { display: block; }
-  .waveform-bar canvas { display: block; width: 100%; height: 72px; }
+  .waveform-bar canvas { display: block; width: 100%; height: 72px; pointer-events: none; }
   .waveform-time { position: absolute; top: 4px; right: 10px; font-family: var(--mono); font-size: 10px; color: var(--text3); pointer-events: none; font-variant-numeric: tabular-nums; }
   .w.waveform-hover { background: rgba(255,255,255,0.1); border-radius: 2px; }
   .w.waveform-flash { background: rgba(29,158,117,0.45) !important; transition: background 0.8s ease-out; border-radius: 2px; }
@@ -989,9 +989,6 @@ let waveformPlayhead = 0;
 let waveformPlayStart = 0;
 let playheadAnimFrame = null;
 let silenceRegions = [];
-let waveformDragStartT = null;
-let waveformDragEndT = null;
-let waveformIsDragging = false;
 let wordSpanIndex = [];
 let lastHoverWordSpan = null;
 
@@ -1070,24 +1067,25 @@ function drawWaveform() {
   ctx.scale(dpr, dpr);
 
   const cs = getComputedStyle(document.documentElement);
+  const textColor = cs.getPropertyValue('--text').trim();
   ctx.fillStyle = cs.getPropertyValue('--bg2').trim();
   ctx.fillRect(0, 0, W, H);
 
-  // Silence regions
+  // Silence markers — shape-based: small downward tick at bottom of canvas
   silenceRegions.forEach(s => {
-    const x1 = (s.start / waveformDuration) * W;
-    const x2 = (s.end / waveformDuration) * W;
-    ctx.fillStyle = 'rgba(255,255,255,0.03)';
-    ctx.fillRect(x1, 0, x2 - x1, H);
-    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
-    ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
+    const xMid = ((s.start + s.end) / 2 / waveformDuration) * W;
+    ctx.fillStyle = cs.getPropertyValue('--text3').trim() || '#888';
+    ctx.beginPath();
+    ctx.moveTo(xMid - 3, H - 8);
+    ctx.lineTo(xMid + 3, H - 8);
+    ctx.lineTo(xMid, H - 3);
+    ctx.closePath();
+    ctx.fill();
   });
 
-  // Clip regions + labels
+  // Clip regions + fixed-position number badges
   ctx.font = `bold 10px monospace`;
-  ctx.textBaseline = 'top';
+  ctx.textBaseline = 'middle';
   (state.text_clips || []).forEach(c => {
     const x1 = (c.start / waveformDuration) * W;
     const x2 = (c.end / waveformDuration) * W;
@@ -1098,137 +1096,86 @@ function drawWaveform() {
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
-    // Clip number label
+    // Badge: always visible pill at top of region start
     const label = c.id.replace('clip_', '');
     const tw = ctx.measureText(label).width;
-    if (rw > tw + 6) {
-      ctx.fillStyle = 'rgba(29,158,117,0.9)';
-      ctx.fillText(label, x1 + (rw - tw) / 2, 4);
-    }
+    const bx = x1 + 3, by = 4, bw2 = tw + 6, bh2 = 14;
+    ctx.fillStyle = 'rgba(29,158,117,0.85)';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw2, bh2, 3);
+    ctx.fill();
+    ctx.fillStyle = '#fff';
+    ctx.fillText(label, bx + 3, by + bh2 / 2);
   });
-
-  // Drag selection
-  if (waveformDragStartT !== null && waveformDragEndT !== null) {
-    const ds = Math.min(waveformDragStartT, waveformDragEndT);
-    const de = Math.max(waveformDragStartT, waveformDragEndT);
-    const x1 = (ds / waveformDuration) * W;
-    const x2 = (de / waveformDuration) * W;
-    ctx.fillStyle = 'rgba(55,138,221,0.25)';
-    ctx.fillRect(x1, 0, x2 - x1, H);
-    ctx.strokeStyle = 'rgba(55,138,221,0.8)';
-    ctx.lineWidth = 1.5;
-    ctx.strokeRect(x1, 0, x2 - x1, H);
-  }
 
   // Waveform bars
   const pts = waveformData;
   const bw = W / pts.length;
   const cy = H / 2;
-  ctx.fillStyle = cs.getPropertyValue('--text3').trim() || '#555';
+  ctx.fillStyle = cs.getPropertyValue('--text3').trim() || '#888';
   pts.forEach((v, i) => {
     const bh = Math.max(1, v * H * 0.88);
     ctx.fillRect(i * bw, cy - bh / 2, Math.max(0.8, bw - 0.5), bh);
   });
 
-  // Playhead
+  // Playhead — use --text color so it's visible in both light and dark mode
   if (waveformPlayhead > 0 && waveformDuration > 0) {
     const px = (waveformPlayhead / waveformDuration) * W;
-    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
+    ctx.strokeStyle = textColor;
+    ctx.globalAlpha = 0.7;
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
-    // Small triangle indicator at top
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath(); ctx.moveTo(px - 4, 0); ctx.lineTo(px + 4, 0); ctx.lineTo(px, 6); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = textColor;
+    ctx.beginPath(); ctx.moveTo(px - 4, 0); ctx.lineTo(px + 4, 0); ctx.lineTo(px, 7); ctx.closePath(); ctx.fill();
+    ctx.globalAlpha = 1;
   }
 }
 
 function startPlayheadAnimation() {
   if (playheadAnimFrame) cancelAnimationFrame(playheadAnimFrame);
   function tick() {
-    if (!snippetAudio.paused && !snippetAudio.ended) {
-      waveformPlayhead = waveformPlayStart + snippetAudio.currentTime;
-      drawWaveform();
+    waveformPlayhead = waveformPlayStart + snippetAudio.currentTime;
+    drawWaveform();
+    if (!snippetAudio.ended) {
       playheadAnimFrame = requestAnimationFrame(tick);
     } else {
       playheadAnimFrame = null;
     }
   }
-  playheadAnimFrame = requestAnimationFrame(tick);
+  // Wait for play event in case audio hasn't started yet
+  if (!snippetAudio.paused) {
+    tick();
+  } else {
+    snippetAudio.addEventListener('play', tick, { once: true });
+  }
 }
 
 function waveformMouseDown(e) {
-  if (!waveformDuration) return;
+  if (!waveformDuration || !state.source_file) return;
   const rect = e.currentTarget.getBoundingClientRect();
   const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
-  waveformDragStartT = t;
-  waveformDragEndT = t;
-  waveformIsDragging = true;
+  waveformPlayhead = t;
+  drawWaveform();
+  playSnippet(state.source_file, t, Math.min(waveformDuration, t + 30));
+  scrollTranscriptToTime(t);
 }
 
 function waveformMouseMove(e) {
   if (!waveformDuration) return;
   const rect = e.currentTarget.getBoundingClientRect();
   const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
-
-  // Update timestamp display
   document.getElementById('waveform-time').textContent = formatTime(t);
-
-  // Hover word highlight (throttled)
   if (wordSpanIndex.length) {
     if (lastHoverWordSpan) lastHoverWordSpan.classList.remove('waveform-hover');
     const span = findWordSpanAtTime(t);
     if (span) { span.classList.add('waveform-hover'); lastHoverWordSpan = span; }
     else lastHoverWordSpan = null;
   }
-
-  // Drag in progress
-  if (waveformIsDragging) {
-    waveformDragEndT = t;
-    drawWaveform();
-  }
-}
-
-document.addEventListener('mouseup', e => {
-  if (!waveformIsDragging) return;
-  waveformIsDragging = false;
-  const ds = Math.min(waveformDragStartT, waveformDragEndT);
-  const de = Math.max(waveformDragStartT, waveformDragEndT);
-  const dragDuration = de - ds;
-  if (dragDuration < 0.3) {
-    // Treat as click: seek + scroll
-    waveformDragStartT = null; waveformDragEndT = null;
-    waveformPlayhead = ds;
-    drawWaveform();
-    if (state.source_file) playSnippet(state.source_file, ds, Math.min(waveformDuration, ds + 30));
-    scrollTranscriptToTime(ds);
-  } else {
-    // Treat as drag: mark clip from selection
-    waveformDragStartT = null; waveformDragEndT = null;
-    markClipFromWaveform(ds, de);
-  }
-});
-
-async function markClipFromWaveform(start, end) {
-  // Find transcript text in this range
-  const words = (state.words || []).filter(w => w.start >= start - 0.05 && w.end <= end + 0.05);
-  const text = words.map(w => w.word).join(' ');
-  const res = await fetch('/add_clip', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ start, end, text, source: 'interview' })
-  });
-  const data = await res.json();
-  if (data.ok) {
-    state.text_clips = data.clips;
-    renderClipsList();
-    renderTranscript();
-    drawWaveform();
-  }
 }
 
 function waveformHoverEnd() {
   document.getElementById('waveform-time').textContent = '';
   if (lastHoverWordSpan) { lastHoverWordSpan.classList.remove('waveform-hover'); lastHoverWordSpan = null; }
-  waveformIsDragging = false;
 }
 
 function toggleTrim(id, source) {

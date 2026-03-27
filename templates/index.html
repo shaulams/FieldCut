@@ -4,8 +4,10 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Field Cut</title>
+<meta name="theme-color" content="#0e0e0e">
 <style>
   :root {
+    color-scheme: dark;
     --bg: #0e0e0e;
     --bg2: #161616;
     --bg3: #1e1e1e;
@@ -21,6 +23,7 @@
     --sans: 'Heebo', 'Assistant', system-ui, sans-serif;
   }
   [data-theme="light"] {
+    color-scheme: light;
     --bg: #f5f5f5;
     --bg2: #ffffff;
     --bg3: #eaeaea;
@@ -34,20 +37,23 @@
     --blue-dim: rgba(43,108,176,0.08);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; height: 100vh; display: flex; flex-direction: column; }
+  body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; height: 100vh; display: flex; flex-direction: column; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
   /* TOP BAR */
   .topbar { height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
   .logo { font-family: var(--mono); font-size: 12px; font-weight: 600; letter-spacing: 0.15em; color: var(--green); }
   .file-info { font-family: var(--mono); font-size: 11px; color: var(--text2); }
-  .topbar-btn { font-family: var(--mono); font-size: 10px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+  .topbar-btn { font-family: var(--mono); font-size: 10px; padding: 4px 12px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: border-color 0.15s, color 0.15s; }
   .topbar-btn:hover { border-color: var(--green); color: var(--green); }
-  .project-name { font-family: var(--mono); font-size: 11px; color: var(--text); cursor: pointer; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; transition: all 0.15s; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .topbar-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  .project-name { font-family: var(--mono); font-size: 11px; color: var(--text); cursor: pointer; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; transition: border-color 0.15s, color 0.15s; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .project-name:hover { border-color: var(--border); color: var(--green); }
   .topbar-sep { width: 1px; height: 20px; background: var(--border); }
-  .lang-btn { font-family: var(--mono); font-size: 10px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: all 0.15s; }
+  .lang-btn { font-family: var(--mono); font-size: 10px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: border-color 0.15s, color 0.15s; }
   .lang-btn:hover { border-color: var(--green); color: var(--green); }
-  .status-pill { font-family: var(--mono); font-size: 10px; padding: 3px 10px; border-radius: 20px; margin-left: auto; }
+  .lang-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+  .status-pill { font-family: var(--mono); font-size: 10px; padding: 3px 10px; border-radius: 20px; margin-left: auto; font-variant-numeric: tabular-nums; }
   .status-idle { background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
   .status-working { background: rgba(55,138,221,0.15); color: var(--blue); border: 1px solid rgba(55,138,221,0.3); }
   .status-done { background: rgba(29,158,117,0.15); color: var(--green); border: 1px solid rgba(29,158,117,0.3); }
@@ -68,7 +74,7 @@
 
   /* WORD-LEVEL TRANSCRIPT */
   .paragraph { margin-bottom: 14px; line-height: 1.8; position: relative; }
-  .para-ts { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-left: 8px; cursor: pointer; user-select: none; }
+  .para-ts { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-left: 8px; cursor: pointer; user-select: none; font-variant-numeric: tabular-nums; }
   .para-ts:hover { color: var(--text2); }
   .w { cursor: text; color: var(--text2); transition: background 0.1s; border-radius: 2px; padding: 1px 0; }
   .w:hover { background: rgba(255,255,255,0.04); }
@@ -84,7 +90,8 @@
   /* FLOATING TOOLBAR */
   .sel-toolbar { position: fixed; display: none; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; padding: 4px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 100; gap: 3px; flex-direction: row; }
   .sel-toolbar.visible { display: flex; }
-  .sel-btn { padding: 5px 10px; border-radius: 5px; font-family: var(--mono); font-size: 10px; border: none; cursor: pointer; background: transparent; color: var(--text2); transition: all 0.1s; white-space: nowrap; }
+  .sel-btn { padding: 5px 10px; border-radius: 5px; font-family: var(--mono); font-size: 10px; border: none; cursor: pointer; background: transparent; color: var(--text2); transition: background 0.1s, color 0.1s; white-space: nowrap; }
+  .sel-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 1px; }
   .sel-btn:hover { background: var(--bg3); color: var(--text); }
   .sel-btn.sel-play { color: var(--blue); }
   .sel-btn.sel-play:hover { background: rgba(55,138,221,0.1); }
@@ -137,12 +144,13 @@
   .clip-item:last-child { border-bottom: none; }
   .clip-num { font-family: var(--mono); font-size: 10px; color: var(--text3); width: 20px; flex-shrink: 0; }
   .clip-name { font-family: var(--mono); font-size: 10px; color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .clip-dur { font-family: var(--mono); font-size: 10px; color: var(--text3); flex-shrink: 0; }
+  .clip-dur { font-family: var(--mono); font-size: 10px; color: var(--text3); flex-shrink: 0; font-variant-numeric: tabular-nums; }
   .clip-x { font-size: 12px; color: var(--text3); cursor: pointer; flex-shrink: 0; }
   .clip-x:hover { color: #e06060; }
   .clip-text-preview { font-size: 10px; color: var(--text3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
 
-  .btn { width: 100%; padding: 8px 12px; border-radius: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; text-align: center; transition: all 0.15s; }
+  .btn { width: 100%; padding: 8px 12px; border-radius: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: 0.05em; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; text-align: center; transition: background 0.15s, color 0.15s, border-color 0.15s; }
+  .btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
   .btn:hover { background: var(--bg3); color: var(--text); }
   .btn-primary { border-color: rgba(29,158,117,0.5); color: var(--green); }
   .btn-primary:hover { background: var(--green-dim); }
@@ -151,7 +159,7 @@
 
   input[type="file"] { display: none; }
   textarea { background: var(--bg3); border: 1px solid var(--border); border-radius: 5px; color: var(--text); padding: 6px 8px; font-family: var(--sans); font-size: 11px; width: 100%; resize: vertical; min-height: 50px; margin-bottom: 4px; }
-  textarea:focus { outline: none; border-color: var(--green); }
+  textarea:focus { outline: none; border-color: var(--green); box-shadow: 0 0 0 2px var(--green-dim); }
 
   /* PROGRESS BAR */
   .progress-bar { display: none; margin-top: 6px; }
@@ -160,7 +168,7 @@
   .progress-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width 0.3s ease; }
   .progress-fill.indeterminate { width: 30% !important; animation: indeterminate 1.5s ease-in-out infinite; }
   @keyframes indeterminate { 0% { margin-left: 0%; } 50% { margin-left: 70%; } 100% { margin-left: 0%; } }
-  .progress-label { font-family: var(--mono); font-size: 9px; color: var(--text2); margin-top: 4px; display: flex; justify-content: space-between; }
+  .progress-label { font-family: var(--mono); font-size: 9px; color: var(--text2); margin-top: 4px; display: flex; justify-content: space-between; font-variant-numeric: tabular-nums; }
   .progress-label .elapsed { color: var(--text3); }
 
   .hint { font-family: var(--mono); font-size: 9px; color: var(--text3); margin-top: 2px; }
@@ -185,7 +193,7 @@
   /* PROJECTS DRAWER */
   .projects-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.5); z-index: 200; }
   .projects-overlay.open { display: block; }
-  .projects-drawer { position: fixed; top: 0; left: 0; width: 320px; height: 100vh; background: var(--bg2); border-left: 1px solid var(--border); z-index: 201; transform: translateX(-100%); transition: transform 0.2s ease; display: flex; flex-direction: column; }
+  .projects-drawer { position: fixed; top: 0; left: 0; width: 320px; height: 100vh; background: var(--bg2); border-left: 1px solid var(--border); z-index: 201; transform: translateX(-100%); transition: transform 0.2s ease; display: flex; flex-direction: column; overscroll-behavior: contain; }
   [dir="ltr"] .projects-drawer { left: auto; right: 0; transform: translateX(100%); }
   .projects-overlay.open .projects-drawer { transform: translateX(0); }
   .drawer-header { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; border-bottom: 1px solid var(--border); }
@@ -208,7 +216,7 @@
   .search-bar { display: none; padding: 0 24px 8px; }
   .search-bar.active { display: flex; gap: 6px; align-items: center; }
   .search-bar input { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 11px; padding: 5px 8px; outline: none; }
-  .search-bar input:focus { border-color: var(--green); }
+  .search-bar input:focus { border-color: var(--green); box-shadow: 0 0 0 2px var(--green-dim); }
   .search-bar .search-nav { font-family: var(--mono); font-size: 9px; color: var(--text3); white-space: nowrap; }
   .search-bar button { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text2); cursor: pointer; padding: 3px 8px; font-size: 11px; }
   .search-bar button:hover { border-color: var(--green); color: var(--green); }
@@ -233,8 +241,8 @@
   <button class="topbar-btn" onclick="newProject()" data-i18n="new_project"></button>
   <span class="status-pill status-idle" id="status-pill" data-i18n="idle"></span>
   <span class="autosave-dot" id="autosave-dot" title="Auto-saved"></span>
-  <button class="lang-btn" id="lang-toggle" onclick="cycleLang()">EN</button>
-  <button class="topbar-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode" style="padding:4px 8px;font-size:13px;border:none">&#9790;</button>
+  <button class="lang-btn" id="lang-toggle" onclick="cycleLang()" aria-label="Switch language">EN</button>
+  <button class="topbar-btn" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode" title="Toggle light/dark mode" style="padding:4px 8px;font-size:13px;border:none">&#9790;</button>
 </div>
 
 <!-- PROJECTS DRAWER -->
@@ -242,7 +250,7 @@
   <div class="projects-drawer" onclick="event.stopPropagation()">
     <div class="drawer-header">
       <h2 data-i18n="projects_title"></h2>
-      <button class="drawer-close" onclick="closeProjectsDrawer()">&times;</button>
+      <button class="drawer-close" onclick="closeProjectsDrawer()" aria-label="Close">&times;</button>
     </div>
     <div class="drawer-body" id="drawer-body">
       <div class="drawer-empty" data-i18n="no_projects"></div>
@@ -297,7 +305,7 @@
         </div>
         <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
         <div class="search-bar" id="search-bar">
-          <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" oninput="doSearch()" onkeydown="searchKeydown(event)">
+          <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" aria-label="Search transcript" oninput="doSearch()" onkeydown="searchKeydown(event)">
           <span class="search-nav" id="search-nav"></span>
           <button onclick="searchNav(-1)">&uarr;</button>
           <button onclick="searchNav(1)">&darr;</button>
@@ -344,7 +352,7 @@
 
       <div class="panel">
         <h3 data-i18n="script_title"></h3>
-        <textarea id="script-text" data-i18n-placeholder="script_placeholder"></textarea>
+        <textarea id="script-text" data-i18n-placeholder="script_placeholder" aria-label="Narration script"></textarea>
         <button class="btn" onclick="document.getElementById('script-file-input').click()" style="font-size:9px" data-i18n="import_script"></button>
         <input type="file" id="script-file-input" accept=".docx,.txt,.doc" onchange="importScript(event)">
       </div>
@@ -467,6 +475,7 @@ function toggleTheme() {
   html.setAttribute('data-theme', next);
   localStorage.setItem('fieldcut-theme', next);
   document.getElementById('theme-toggle').innerHTML = next === 'light' ? '&#9728;' : '&#9790;';
+  document.querySelector('meta[name="theme-color"]').content = next === 'light' ? '#f5f5f5' : '#0e0e0e';
 }
 (function initTheme() {
   const saved = localStorage.getItem('fieldcut-theme');

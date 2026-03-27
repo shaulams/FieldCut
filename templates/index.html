@@ -132,6 +132,12 @@
   .asm-tl-item.drag-over-right { box-shadow: inset -3px 0 0 var(--text); }
   .asm-actions { display: flex; gap: 8px; margin-top: 10px; align-items: center; }
   .asm-actions .btn { width: auto; padding: 8px 18px; }
+  .gap-control { display: flex; align-items: center; gap: 6px; margin-top: 8px; }
+  .gap-control label { font-family: var(--sans); font-size: 13px; color: var(--text2); }
+  .gap-control .gap-adj { width: 28px; height: 28px; border: 1px solid var(--border); border-radius: 5px; background: transparent; color: var(--text2); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s, color 0.15s; padding: 0; }
+  .gap-control .gap-adj:hover { border-color: var(--green); color: var(--green); }
+  .gap-control .gap-adj:active { transform: scale(0.96); }
+  .gap-value { font-family: var(--mono); font-size: 13px; color: var(--text); min-width: 36px; text-align: center; font-variant-numeric: tabular-nums; }
 
   /* RIGHT PANEL */
   .panel { background: var(--bg2); border-radius: 8px; padding: 14px; box-shadow: 0 0 0 1px var(--border), 0 2px 8px rgba(0,0,0,0.15), 0 1px 2px rgba(0,0,0,0.1); }
@@ -397,14 +403,24 @@
 
     <div class="asm-timeline" id="asm-timeline" style="flex:1;min-height:80px;align-content:flex-start"></div>
 
-    <div class="asm-actions" style="margin-top:12px">
+    <div class="gap-control">
+      <label data-i18n="gap_label"></label>
+      <button class="gap-adj" onclick="adjustGap(-0.5)">−</button>
+      <span class="gap-value" id="gap-display">1.0s</span>
+      <button class="gap-adj" onclick="adjustGap(0.5)">+</button>
+    </div>
+
+    <div class="asm-actions" style="margin-top:8px">
       <button class="btn btn-primary" onclick="assembleRoughCut()" style="flex:1" data-i18n="assemble"></button>
       <button class="btn" onclick="clearAssembly()" style="flex:0 0 auto;width:auto;padding:7px 12px" data-i18n="clear"></button>
     </div>
 
-    <div id="phase3-done-actions" style="display:none;margin-top:12px;gap:8px">
-      <button class="btn btn-primary" onclick="saveProject()" style="flex:1" data-i18n="save_project"></button>
-      <button class="btn" onclick="newProject()" style="flex:1" data-i18n="new_project"></button>
+    <div id="phase3-done-actions" style="display:none;margin-top:12px;gap:8px;flex-direction:column">
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="saveProject()" style="flex:1" data-i18n="save_project"></button>
+        <button class="btn" onclick="newProject()" style="flex:1" data-i18n="new_project"></button>
+      </div>
+      <button class="btn" onclick="exportPaperEdit()" data-i18n="export_paper_edit"></button>
     </div>
   </div>
 </div>
@@ -1108,13 +1124,19 @@ function initDragAndDrop() {
 function removeFromAssembly(i) { assemblyOrder.splice(i, 1); renderTimeline(); }
 function clearAssembly() { assemblyOrder = []; renderTimeline(); }
 
+let assemblyGap = 1.0;
+function adjustGap(delta) {
+  assemblyGap = Math.round(Math.max(0, Math.min(5, assemblyGap + delta)) * 10) / 10;
+  document.getElementById('gap-display').textContent = assemblyGap.toFixed(1) + 's';
+}
+
 async function assembleRoughCut() {
   if (assemblyOrder.length === 0) { alert(t('drag_first')); return; }
   setStatus('working', t('assembling'));
   const res = await fetch('/assemble', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ order: assemblyOrder, output_name: 'rough_cut.wav' })
+    body: JSON.stringify({ order: assemblyOrder, output_name: 'rough_cut.wav', gap: assemblyGap })
   });
   const data = await res.json();
   if (data.error) { setStatus('error', data.error); return; }
@@ -1125,6 +1147,23 @@ async function assembleRoughCut() {
     renderPhaseButtons();
     window.location.href = '/download/rough_cut.wav';
   });
+}
+
+async function exportPaperEdit() {
+  if (assemblyOrder.length === 0) { alert(t('drag_first')); return; }
+  setStatus('working', t('assembling'));
+  const res = await fetch('/export_paper_edit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order: assemblyOrder })
+  });
+  if (!res.ok) { setStatus('error', t('server_error')); return; }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'paper_edit.docx'; a.click();
+  URL.revokeObjectURL(url);
+  setStatus('done', t('paper_edit_ready'));
 }
 
 // ── PROGRESS BAR ──

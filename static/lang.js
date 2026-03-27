@@ -50,6 +50,9 @@ const LANGS = {
     assemble: "▶ assemble rough cut",
     clear: "clear",
     save_project: "save project",
+    gap_label: "gap between clips",
+    export_paper_edit: "export paper edit (.docx)",
+    paper_edit_ready: "paper edit ready!",
 
     // Assembly empty states
     asm_empty: "drag clips and narration here to build the rough cut",
@@ -157,6 +160,9 @@ const LANGS = {
     assemble: "הרכב קובץ שלם ◀",
     clear: "נקה",
     save_project: "שמור פרויקט",
+    gap_label: "הפסקה בין קליפים",
+    export_paper_edit: "ייצוא עריכת נייר (.docx)",
+    paper_edit_ready: "עריכת הנייר מוכנה!",
 
     // Assembly empty states
     asm_empty: "גרור קליפים וקריינות לכאן כדי לבנות את הקובץ השלם",

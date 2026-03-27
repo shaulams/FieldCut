@@ -601,6 +601,7 @@ def assemble():
     data = request.json
     assembly_order = data.get("order", [])
     output_name = data.get("output_name", "rough_cut.wav")
+    gap_seconds = max(0.0, min(5.0, float(data.get("gap", 1.0))))
 
     state = load_state()
     clips_map = {c["id"]: c["path"] for c in state.get("clips", [])}
@@ -629,17 +630,19 @@ def assemble():
 
             output_path = os.path.join("output", output_name)
 
-            # Generate 1s silence file for gaps between every clip
+            # Generate silence file for gaps between clips
             silence_path = os.path.join("output", "_silence.wav")
-            subprocess.run([
-                "ffmpeg", "-y", "-f", "lavfi", "-t", "1",
-                "-i", "anullsrc=r=44100:cl=mono",
-                "-c:a", "pcm_s16le", silence_path
-            ], capture_output=True)
+            if gap_seconds > 0:
+                subprocess.run([
+                    "ffmpeg", "-y", "-f", "lavfi", "-t", str(gap_seconds),
+                    "-i", "anullsrc=r=44100:cl=mono",
+                    "-c:a", "pcm_s16le", silence_path
+                ], capture_output=True)
 
             final_paths = [file_paths[0]]
             for i in range(1, len(file_paths)):
-                final_paths.append(os.path.abspath(silence_path))
+                if gap_seconds > 0:
+                    final_paths.append(os.path.abspath(silence_path))
                 final_paths.append(file_paths[i])
 
             cmd = ["ffmpeg", "-y"]
@@ -673,6 +676,90 @@ def assemble():
 
     threading.Thread(target=do_assemble).start()
     return jsonify({"message": "Assembly started"})
+
+
+@app.route("/export_paper_edit", methods=["POST"])
+def export_paper_edit():
+    from docx import Document
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
+    data = request.json
+    assembly_order = data.get("order", [])
+
+    state = load_state()
+    clips_map = {c["id"]: c for c in state.get("clips", [])}
+    narration_map = {n["name"]: n for n in state.get("narration", [])}
+
+    # Build word-level lookup: clip_id → text
+    clip_text = {}
+    for seg in state.get("transcript", []):
+        cid = seg.get("clip_id")
+        if cid:
+            clip_text[cid] = clip_text.get(cid, "") + seg.get("text", "")
+    for seg in state.get("narration_transcript", []):
+        cid = seg.get("clip_id")
+        if cid:
+            clip_text[cid] = clip_text.get(cid, "") + seg.get("text", "")
+
+    doc = Document()
+    # RTL paragraph direction for Hebrew
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
+
+    def set_rtl(para):
+        pPr = para._p.get_or_add_pPr()
+        bidi = OxmlElement('w:bidi')
+        pPr.append(bidi)
+        for run in para.runs:
+            rPr = run._r.get_or_add_rPr()
+            rtl = OxmlElement('w:rtl')
+            rPr.append(rtl)
+
+    title = doc.add_heading(state.get("project_name", "Paper Edit"), 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    for i, item in enumerate(assembly_order, 1):
+        item_type = item.get("type")
+        if item_type == "clip":
+            cid = item.get("id")
+            clip = clips_map.get(cid, {})
+            start = clip.get("start", 0)
+            end = clip.get("end", 0)
+            text = clip_text.get(cid, "").strip()
+
+            # Type label
+            label_para = doc.add_paragraph()
+            label_run = label_para.add_run(f"[{i}] CLIP — {cid}  {start:.1f}s – {end:.1f}s")
+            label_run.bold = True
+            label_run.font.color.rgb = RGBColor(0x1D, 0x9E, 0x75)
+
+            # Text
+            if text:
+                p = doc.add_paragraph(text)
+                set_rtl(p)
+            else:
+                doc.add_paragraph("(no transcript text)")
+
+        elif item_type == "narration":
+            fname = item.get("file", "")
+            text = clip_text.get(item.get("id", ""), "").strip()
+
+            label_para = doc.add_paragraph()
+            label_run = label_para.add_run(f"[{i}] NARRATION — {fname}")
+            label_run.bold = True
+            label_run.font.color.rgb = RGBColor(0x37, 0x8A, 0xDD)
+
+            if text:
+                p = doc.add_paragraph(text)
+                set_rtl(p)
+
+        doc.add_paragraph()  # spacer
+
+    out_path = os.path.join("output", "paper_edit.docx")
+    doc.save(out_path)
+    return send_file(out_path, as_attachment=True, download_name="paper_edit.docx")
+
 
 # ─── AUDIO ────────────────────────────────────────────────
 

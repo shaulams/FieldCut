@@ -189,6 +189,7 @@ def transcribe():
             state["clips"] = []
             state["status"] = "transcribed"
             state["filename"] = filename
+            state["transcription_language"] = whisper_lang or "auto"
             save_state(state)
             progress.update(current=progress["total"], message="done", phase=None)
 
@@ -545,12 +546,14 @@ def process_narration():
             else:
                 progress.update(phase="narration", current=0, total=2, message="transcribing narration…")
 
+            narr_lang = st.get("transcription_language", "he")
             whisper_kwargs = {
                 "model": "whisper-1",
-                "language": "he",
                 "response_format": "verbose_json",
                 "timestamp_granularities": ["word", "segment"],
             }
+            if narr_lang and narr_lang != "auto":
+                whisper_kwargs["language"] = narr_lang
             if script_text:
                 whisper_kwargs["prompt"] = script_text[:500]
 

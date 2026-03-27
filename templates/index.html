@@ -237,10 +237,12 @@
   .drawer-project-delete:hover { color: #e06060; }
 
   /* WAVEFORM */
-  .waveform-bar { flex-shrink: 0; background: var(--bg2); border-bottom: 1px solid var(--border); position: relative; cursor: crosshair; display: none; }
+  .waveform-bar { flex-shrink: 0; background: var(--bg2); border-bottom: 1px solid var(--border); position: relative; cursor: crosshair; display: none; user-select: none; }
   .waveform-bar.visible { display: block; }
   .waveform-bar canvas { display: block; width: 100%; height: 72px; }
   .waveform-time { position: absolute; top: 4px; right: 10px; font-family: var(--mono); font-size: 10px; color: var(--text3); pointer-events: none; font-variant-numeric: tabular-nums; }
+  .w.waveform-hover { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  .w.waveform-flash { background: rgba(29,158,117,0.45) !important; transition: background 0.8s ease-out; border-radius: 2px; }
 
   /* SEARCH BAR */
   .search-bar { display: none; padding: 0 24px 8px; }
@@ -313,7 +315,7 @@
 <div class="phase-screen active" id="phase-1">
   <div class="main">
   <div class="center">
-    <div class="waveform-bar" id="waveform-bar" onclick="waveformClick(event)" onmousemove="waveformHover(event)" onmouseleave="waveformHoverEnd()">
+    <div class="waveform-bar" id="waveform-bar" onmousedown="waveformMouseDown(event)" onmousemove="waveformMouseMove(event)" onmouseleave="waveformHoverEnd()">
       <canvas id="waveform-canvas" height="72"></canvas>
       <div class="waveform-time" id="waveform-time"></div>
     </div>
@@ -719,6 +721,7 @@ function renderTranscript() {
 
     container.appendChild(para);
   });
+  buildWordSpanIndex();
 }
 
 // ── RENDER NARRATION WORD-LEVEL ──
@@ -849,6 +852,10 @@ function playSnippet(file, start, end) {
   if (!file) return;
   snippetAudio.src = `/audio_snippet?file=${encodeURIComponent(file)}&start=${start}&end=${end}`;
   snippetAudio.play().catch(() => {});
+  if (waveformData && (file === state.source_file || file === waveformSourceFile)) {
+    waveformPlayStart = start;
+    startPlayheadAnimation();
+  }
 }
 
 function playSelection() {
@@ -979,6 +986,14 @@ let waveformData = null;
 let waveformDuration = 0;
 let waveformSourceFile = null;
 let waveformPlayhead = 0;
+let waveformPlayStart = 0;
+let playheadAnimFrame = null;
+let silenceRegions = [];
+let waveformDragStartT = null;
+let waveformDragEndT = null;
+let waveformIsDragging = false;
+let wordSpanIndex = [];
+let lastHoverWordSpan = null;
 
 async function loadWaveform(sourceFile) {
   if (!sourceFile) return;
@@ -990,8 +1005,57 @@ async function loadWaveform(sourceFile) {
   waveformData = data.points;
   waveformDuration = data.duration;
   waveformSourceFile = sourceFile;
+  computeSilences();
   document.getElementById('waveform-bar').classList.add('visible');
   drawWaveform();
+}
+
+function computeSilences() {
+  silenceRegions = [];
+  if (!waveformData || !waveformDuration) return;
+  const threshold = 0.06;
+  const secPerPt = waveformDuration / waveformData.length;
+  const minPts = Math.ceil(1.5 / secPerPt);
+  let silStart = null, silLen = 0;
+  waveformData.forEach((v, i) => {
+    if (v < threshold) {
+      if (silStart === null) silStart = i;
+      silLen++;
+    } else {
+      if (silStart !== null && silLen >= minPts)
+        silenceRegions.push({ start: silStart * secPerPt, end: (silStart + silLen) * secPerPt });
+      silStart = null; silLen = 0;
+    }
+  });
+  if (silStart !== null && silLen >= minPts)
+    silenceRegions.push({ start: silStart * secPerPt, end: waveformDuration });
+}
+
+function buildWordSpanIndex() {
+  wordSpanIndex = [];
+  document.querySelectorAll('#transcript-body .w[data-s]').forEach(span => {
+    wordSpanIndex.push({ start: parseFloat(span.dataset.s), end: parseFloat(span.dataset.e), span });
+  });
+}
+
+function findWordSpanAtTime(t) {
+  let best = null, bestDist = Infinity;
+  for (const entry of wordSpanIndex) {
+    if (t >= entry.start && t <= entry.end) return entry.span;
+    const dist = Math.min(Math.abs(t - entry.start), Math.abs(t - entry.end));
+    if (dist < bestDist) { bestDist = dist; best = entry; }
+  }
+  return best ? best.span : null;
+}
+
+function scrollTranscriptToTime(t) {
+  const span = findWordSpanAtTime(t);
+  if (!span) return;
+  span.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  span.classList.remove('waveform-flash');
+  void span.offsetWidth; // reflow to restart transition
+  span.classList.add('waveform-flash');
+  setTimeout(() => span.classList.remove('waveform-flash'), 900);
 }
 
 function drawWaveform() {
@@ -1009,17 +1073,52 @@ function drawWaveform() {
   ctx.fillStyle = cs.getPropertyValue('--bg2').trim();
   ctx.fillRect(0, 0, W, H);
 
-  // Clip regions
-  (state.text_clips || []).forEach(c => {
-    const x1 = (c.start / waveformDuration) * W;
-    const x2 = (c.end / waveformDuration) * W;
-    ctx.fillStyle = 'rgba(29,158,117,0.18)';
+  // Silence regions
+  silenceRegions.forEach(s => {
+    const x1 = (s.start / waveformDuration) * W;
+    const x2 = (s.end / waveformDuration) * W;
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
     ctx.fillRect(x1, 0, x2 - x1, H);
-    ctx.strokeStyle = 'rgba(29,158,117,0.7)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.08)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
   });
+
+  // Clip regions + labels
+  ctx.font = `bold 10px monospace`;
+  ctx.textBaseline = 'top';
+  (state.text_clips || []).forEach(c => {
+    const x1 = (c.start / waveformDuration) * W;
+    const x2 = (c.end / waveformDuration) * W;
+    const rw = x2 - x1;
+    ctx.fillStyle = 'rgba(29,158,117,0.18)';
+    ctx.fillRect(x1, 0, rw, H);
+    ctx.strokeStyle = 'rgba(29,158,117,0.7)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
+    // Clip number label
+    const label = c.id.replace('clip_', '');
+    const tw = ctx.measureText(label).width;
+    if (rw > tw + 6) {
+      ctx.fillStyle = 'rgba(29,158,117,0.9)';
+      ctx.fillText(label, x1 + (rw - tw) / 2, 4);
+    }
+  });
+
+  // Drag selection
+  if (waveformDragStartT !== null && waveformDragEndT !== null) {
+    const ds = Math.min(waveformDragStartT, waveformDragEndT);
+    const de = Math.max(waveformDragStartT, waveformDragEndT);
+    const x1 = (ds / waveformDuration) * W;
+    const x2 = (de / waveformDuration) * W;
+    ctx.fillStyle = 'rgba(55,138,221,0.25)';
+    ctx.fillRect(x1, 0, x2 - x1, H);
+    ctx.strokeStyle = 'rgba(55,138,221,0.8)';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(x1, 0, x2 - x1, H);
+  }
 
   // Waveform bars
   const pts = waveformData;
@@ -1034,30 +1133,102 @@ function drawWaveform() {
   // Playhead
   if (waveformPlayhead > 0 && waveformDuration > 0) {
     const px = (waveformPlayhead / waveformDuration) * W;
-    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';
     ctx.lineWidth = 1.5;
     ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+    // Small triangle indicator at top
+    ctx.fillStyle = 'rgba(255,255,255,0.7)';
+    ctx.beginPath(); ctx.moveTo(px - 4, 0); ctx.lineTo(px + 4, 0); ctx.lineTo(px, 6); ctx.closePath(); ctx.fill();
   }
 }
 
-function waveformClick(e) {
-  if (!waveformDuration || !state.source_file) return;
-  const rect = e.currentTarget.getBoundingClientRect();
-  const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
-  waveformPlayhead = t;
-  drawWaveform();
-  playSnippet(state.source_file, t, Math.min(waveformDuration, t + 30));
+function startPlayheadAnimation() {
+  if (playheadAnimFrame) cancelAnimationFrame(playheadAnimFrame);
+  function tick() {
+    if (!snippetAudio.paused && !snippetAudio.ended) {
+      waveformPlayhead = waveformPlayStart + snippetAudio.currentTime;
+      drawWaveform();
+      playheadAnimFrame = requestAnimationFrame(tick);
+    } else {
+      playheadAnimFrame = null;
+    }
+  }
+  playheadAnimFrame = requestAnimationFrame(tick);
 }
 
-function waveformHover(e) {
+function waveformMouseDown(e) {
   if (!waveformDuration) return;
   const rect = e.currentTarget.getBoundingClientRect();
   const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
+  waveformDragStartT = t;
+  waveformDragEndT = t;
+  waveformIsDragging = true;
+}
+
+function waveformMouseMove(e) {
+  if (!waveformDuration) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
+
+  // Update timestamp display
   document.getElementById('waveform-time').textContent = formatTime(t);
+
+  // Hover word highlight (throttled)
+  if (wordSpanIndex.length) {
+    if (lastHoverWordSpan) lastHoverWordSpan.classList.remove('waveform-hover');
+    const span = findWordSpanAtTime(t);
+    if (span) { span.classList.add('waveform-hover'); lastHoverWordSpan = span; }
+    else lastHoverWordSpan = null;
+  }
+
+  // Drag in progress
+  if (waveformIsDragging) {
+    waveformDragEndT = t;
+    drawWaveform();
+  }
+}
+
+document.addEventListener('mouseup', e => {
+  if (!waveformIsDragging) return;
+  waveformIsDragging = false;
+  const ds = Math.min(waveformDragStartT, waveformDragEndT);
+  const de = Math.max(waveformDragStartT, waveformDragEndT);
+  const dragDuration = de - ds;
+  if (dragDuration < 0.3) {
+    // Treat as click: seek + scroll
+    waveformDragStartT = null; waveformDragEndT = null;
+    waveformPlayhead = ds;
+    drawWaveform();
+    if (state.source_file) playSnippet(state.source_file, ds, Math.min(waveformDuration, ds + 30));
+    scrollTranscriptToTime(ds);
+  } else {
+    // Treat as drag: mark clip from selection
+    waveformDragStartT = null; waveformDragEndT = null;
+    markClipFromWaveform(ds, de);
+  }
+});
+
+async function markClipFromWaveform(start, end) {
+  // Find transcript text in this range
+  const words = (state.words || []).filter(w => w.start >= start - 0.05 && w.end <= end + 0.05);
+  const text = words.map(w => w.word).join(' ');
+  const res = await fetch('/add_clip', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ start, end, text, source: 'interview' })
+  });
+  const data = await res.json();
+  if (data.ok) {
+    state.text_clips = data.clips;
+    renderClipsList();
+    renderTranscript();
+    drawWaveform();
+  }
 }
 
 function waveformHoverEnd() {
   document.getElementById('waveform-time').textContent = '';
+  if (lastHoverWordSpan) { lastHoverWordSpan.classList.remove('waveform-hover'); lastHoverWordSpan = null; }
+  waveformIsDragging = false;
 }
 
 function toggleTrim(id, source) {

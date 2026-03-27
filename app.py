@@ -1010,8 +1010,18 @@ def list_projects():
             if entry == "_session":
                 continue
             entry_path = os.path.join("projects", entry)
-            if os.path.isdir(entry_path) and os.path.exists(os.path.join(entry_path, "state.json")):
-                projects.append(entry)
+            state_path = os.path.join(entry_path, "state.json")
+            if os.path.isdir(entry_path) and os.path.exists(state_path):
+                try:
+                    with open(state_path) as f:
+                        s = json.load(f)
+                    projects.append({
+                        "name": entry,
+                        "interviewee": s.get("interviewee", ""),
+                        "recording_date": s.get("recording_date", ""),
+                    })
+                except Exception:
+                    projects.append({"name": entry, "interviewee": "", "recording_date": ""})
     return jsonify({"projects": projects})
 
 
@@ -1076,6 +1086,49 @@ def delete_project():
     if _active_project_dir == project_dir:
         set_project_dir(os.path.join("projects", "_session"))
     return jsonify({"ok": True})
+
+
+@app.route("/update_metadata", methods=["POST"])
+def update_metadata():
+    data = request.json or {}
+    state = load_state()
+    for field in ["interviewee", "recording_date", "notes"]:
+        if field in data:
+            state[field] = data[field]
+    save_state(state)
+    return jsonify({"ok": True})
+
+
+@app.route("/duplicate_project", methods=["POST"])
+def duplicate_project():
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    project_dir = os.path.join("projects", name)
+    if not os.path.exists(project_dir):
+        return jsonify({"error": "Project not found"}), 404
+
+    # Find a unique name for the copy
+    new_name = name + " copy"
+    counter = 2
+    while os.path.exists(os.path.join("projects", new_name)):
+        new_name = f"{name} copy {counter}"
+        counter += 1
+
+    new_dir = os.path.join("projects", new_name)
+    shutil.copytree(project_dir, new_dir)
+
+    # Update project_name in the copy's state
+    new_state_path = os.path.join(new_dir, "state.json")
+    if os.path.exists(new_state_path):
+        with open(new_state_path) as f:
+            s = json.load(f)
+        s["project_name"] = new_name
+        with open(new_state_path, "w") as f:
+            json.dump(s, f, ensure_ascii=False, indent=2)
+
+    set_project_dir(new_dir)
+    loaded_state = load_state()
+    return jsonify({"ok": True, "name": new_name, "state": loaded_state})
 
 
 @app.route("/reset", methods=["POST"])

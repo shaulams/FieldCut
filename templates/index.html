@@ -239,6 +239,13 @@
   .drawer-project-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 16px; padding: 10px; opacity: 0; transition: opacity 0.15s; position: relative; }
   .drawer-project:hover .drawer-project-delete { opacity: 1; }
   .drawer-project-delete:hover { color: #e06060; }
+  .drawer-project-dup { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 13px; padding: 10px 6px; opacity: 0; transition: opacity 0.15s; }
+  .drawer-project:hover .drawer-project-dup { opacity: 1; }
+  .drawer-project-dup:hover { color: var(--text); }
+  .drawer-project-subtitle { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .meta-input { width: 100%; box-sizing: border-box; background: var(--bg2); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 11px; padding: 5px 8px; margin-bottom: 5px; }
+  .meta-input:focus { outline: none; border-color: rgba(29,158,117,0.6); }
+  .meta-label { font-family: var(--mono); font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 3px; display: block; }
 
   /* WAVEFORM */
   .waveform-bar { flex-shrink: 0; background: var(--bg2); border-bottom: 1px solid var(--border); position: relative; cursor: crosshair; display: none; user-select: none; }
@@ -292,6 +299,14 @@
       <div class="drawer-empty" data-i18n="no_projects"></div>
     </div>
     <div class="drawer-footer">
+      <div id="drawer-meta" style="display:none;padding-bottom:10px;border-bottom:1px solid var(--border);margin-bottom:10px">
+        <label class="meta-label" data-i18n="meta_interviewee"></label>
+        <input class="meta-input" id="meta-interviewee" type="text" onblur="saveMetadata()">
+        <label class="meta-label" data-i18n="meta_date"></label>
+        <input class="meta-input" id="meta-date" type="date" onchange="saveMetadata()">
+        <label class="meta-label" data-i18n="meta_notes"></label>
+        <textarea class="meta-input" id="meta-notes" rows="2" style="resize:vertical" onblur="saveMetadata()"></textarea>
+      </div>
       <button class="btn btn-primary" onclick="saveCurrentProject()" style="margin-bottom:6px" data-i18n="save_current"></button>
       <button class="btn" onclick="newProject(); closeProjectsDrawer();" data-i18n="new_project"></button>
     </div>
@@ -1692,7 +1707,7 @@ async function newProject() {
 function toggleProjectsDrawer() {
   const overlay = document.getElementById('projects-overlay');
   overlay.classList.toggle('open');
-  if (overlay.classList.contains('open')) loadProjectList();
+  if (overlay.classList.contains('open')) { loadProjectList(); updateMetaPanel(); }
 }
 
 function closeProjectsDrawer(event) {
@@ -1712,15 +1727,59 @@ async function loadProjectList() {
   }
 
   const currentName = state.project_name || '';
-  body.innerHTML = data.projects.map(function(name) {
+  body.innerHTML = data.projects.map(function(p) {
+    const name = p.name;
     const isActive = name === currentName;
     const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
+    const subtitle = [p.interviewee, p.recording_date].filter(Boolean).join(' · ');
     return '<div class="drawer-project' + (isActive ? ' active' : '') + '">'
-      + '<span class="drawer-project-name" onclick="loadProject(\'' + escaped + '\')">' + name + '</span>'
-      + (isActive ? '<span class="drawer-project-meta">' + t('current') + '</span>' : '')
+      + '<div style="flex:1;min-width:0;cursor:pointer" onclick="loadProject(\'' + escaped + '\')">'
+      + '<div class="drawer-project-name">' + name + (isActive ? ' <span class="drawer-project-meta">' + t('current') + '</span>' : '') + '</div>'
+      + (subtitle ? '<div class="drawer-project-subtitle">' + subtitle + '</div>' : '')
+      + '</div>'
+      + '<button class="drawer-project-dup" onclick="event.stopPropagation();duplicateProject(\'' + escaped + '\')" title="Duplicate">⧉</button>'
       + '<button class="drawer-project-delete" onclick="event.stopPropagation();deleteProject(\'' + escaped + '\')" title="Delete">&times;</button>'
       + '</div>';
   }).join('');
+
+  updateMetaPanel();
+}
+
+function updateMetaPanel() {
+  const panel = document.getElementById('drawer-meta');
+  if (!panel) return;
+  const hasProject = !!state.project_name;
+  panel.style.display = hasProject ? 'block' : 'none';
+  if (hasProject) {
+    document.getElementById('meta-interviewee').value = state.interviewee || '';
+    document.getElementById('meta-date').value = state.recording_date || '';
+    document.getElementById('meta-notes').value = state.notes || '';
+  }
+}
+
+async function saveMetadata() {
+  const interviewee = document.getElementById('meta-interviewee')?.value || '';
+  const recording_date = document.getElementById('meta-date')?.value || '';
+  const notes = document.getElementById('meta-notes')?.value || '';
+  await fetch('/update_metadata', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ interviewee, recording_date, notes })
+  });
+  state.interviewee = interviewee;
+  state.recording_date = recording_date;
+  state.notes = notes;
+}
+
+async function duplicateProject(name) {
+  const res = await fetch('/duplicate_project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  window.location.reload();
 }
 
 async function loadProject(name) {

@@ -12,6 +12,10 @@ const LANGS = {
     no_projects: "No saved projects yet",
     save_current: "save current project",
     current: "current",
+    meta_interviewee: "Interviewee",
+    meta_date: "Recording date",
+    meta_notes: "Notes",
+    duplicate: "Duplicate",
 
     // Phase bar
     phase_interview: "Interview",
@@ -124,6 +128,10 @@ const LANGS = {
     no_projects: "אין פרויקטים שמורים",
     save_current: "שמור פרויקט נוכחי",
     current: "נוכחי",
+    meta_interviewee: "מרואיין",
+    meta_date: "תאריך הקלטה",
+    meta_notes: "הערות",
+    duplicate: "שכפל",
 
     // Phase bar
     phase_interview: "ראיון",

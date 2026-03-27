@@ -880,11 +880,12 @@ function renderClipsList() {
     return;
   }
 
+  const src = state.source_file || '';
   container.innerHTML = clips.map(c => {
     const dur = formatDur(c.end - c.start);
     const isCut = cutIds.has(c.id);
     const preview = c.text.length > 25 ? c.text.slice(0, 25) + '\u2026' : c.text;
-    return `<div class="clip-item">
+    return `<div class="clip-item" data-start="${c.start}" data-end="${c.end}" data-source="${src}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()">
       <span class="clip-num">${c.id.replace('clip_','')}</span>
       <span class="clip-text-preview" title="${c.text}">${preview}</span>
       <span class="clip-dur">${dur}</span>
@@ -901,11 +902,12 @@ function renderNarrClipsList() {
 
   if (clips.length === 0) { container.innerHTML = ''; return; }
 
+  const narrSrc = state.narration_source || '';
   container.innerHTML = clips.map(c => {
     const dur = formatDur(c.end - c.start);
     const isCut = cutNames.has(c.id + '.wav');
     const preview = c.text.length > 25 ? c.text.slice(0, 25) + '\u2026' : c.text;
-    return `<div class="clip-item">
+    return `<div class="clip-item" data-start="${c.start}" data-end="${c.end}" data-source="${narrSrc}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()">
       <span class="clip-num" style="color:var(--blue)">${c.id.replace('narr_','')}</span>
       <span class="clip-text-preview" title="${c.text}">${preview}</span>
       <span class="clip-dur">${dur}</span>
@@ -914,6 +916,33 @@ function renderNarrClipsList() {
     </div>`;
   }).join('');
   container.innerHTML += '<br>';
+}
+
+let previewTimer = null;
+let previewAudio = null;
+
+function startClipPreview(el) {
+  const start = parseFloat(el.dataset.start);
+  const end = parseFloat(el.dataset.end);
+  const src = el.dataset.source;
+  if (!src || isNaN(start) || isNaN(end)) return;
+  previewTimer = setTimeout(() => {
+    stopClipPreview();
+    const previewEnd = Math.min(end, start + 3);
+    const url = `/audio_snippet?file=${encodeURIComponent(src)}&start=${start}&end=${previewEnd}`;
+    previewAudio = new Audio(url);
+    previewAudio.play().catch(() => {});
+  }, 500);
+}
+
+function stopClipPreview() {
+  clearTimeout(previewTimer);
+  previewTimer = null;
+  if (previewAudio) {
+    previewAudio.pause();
+    previewAudio.src = '';
+    previewAudio = null;
+  }
 }
 
 async function removeClip(id, source) {

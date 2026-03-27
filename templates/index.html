@@ -177,6 +177,10 @@
   .btn:hover { background: var(--bg3); color: var(--text); }
   .btn-primary { border-color: rgba(29,158,117,0.5); color: var(--green); }
   .btn-primary:hover { background: var(--green-dim); }
+  .btn-download { background: var(--green); border-color: var(--green); color: #fff; font-size: 13px; padding: 12px 14px; }
+  .btn-download:hover { background: #178a64; border-color: #178a64; color: #fff; }
+  .btn-reassemble { background: transparent; border: none; color: var(--text3); font-size: 11px; cursor: pointer; padding: 2px 0; text-decoration: underline; text-underline-offset: 3px; width: auto; }
+  .btn-reassemble:hover { color: var(--text2); background: transparent; }
   .btn-danger { border-color: rgba(200,50,50,0.3); color: #e06060; }
   .btn-danger:hover { background: rgba(200,50,50,0.08); }
 
@@ -434,19 +438,20 @@
       <button class="gap-adj" onclick="adjustGap(0.5)">+</button>
     </div>
 
-    <div class="asm-actions" style="margin-top:8px">
+    <div id="asm-pre-actions" style="margin-top:8px;display:flex;gap:8px;align-items:center">
       <button class="btn btn-primary" onclick="assembleRoughCut()" style="flex:1" data-i18n="assemble"></button>
       <button class="btn" onclick="clearAssembly()" style="flex:0 0 auto;width:auto;padding:7px 12px" data-i18n="clear"></button>
     </div>
 
     <div id="phase3-done-actions" style="display:none;margin-top:10px;gap:6px;flex-direction:column">
+      <a href="/download_output" class="btn btn-download" style="text-decoration:none;display:block" data-i18n="download_output"></a>
       <div style="display:flex;gap:6px">
-        <a href="/download_output" class="btn btn-primary" style="flex:1;text-align:center;text-decoration:none" data-i18n="download_output"></a>
         <button class="btn" onclick="exportPaperEdit()" style="flex:1" data-i18n="export_paper_edit"></button>
-      </div>
-      <div style="display:flex;gap:6px">
         <button class="btn" onclick="saveProject()" style="flex:1" data-i18n="save_project"></button>
         <button class="btn" onclick="newProject()" style="flex:1" data-i18n="new_project"></button>
+      </div>
+      <div style="text-align:center;margin-top:2px">
+        <button class="btn-reassemble" onclick="reassemble()" data-i18n="reassemble"></button>
       </div>
     </div>
   </div>
@@ -584,8 +589,11 @@ function renderPhaseButtons() {
   const p2done = document.getElementById('phase2-done-actions');
   if (p2done) p2done.style.display = (state.narration && state.narration.length) ? 'block' : 'none';
 
+  const assembled = state.status === 'assembled';
+  const p3pre = document.getElementById('asm-pre-actions');
+  if (p3pre) p3pre.style.display = assembled ? 'none' : 'flex';
   const p3done = document.getElementById('phase3-done-actions');
-  if (p3done) p3done.style.display = (state.status === 'assembled') ? 'flex' : 'none';
+  if (p3done) p3done.style.display = assembled ? 'flex' : 'none';
 }
 
 // ── INIT ──
@@ -1513,6 +1521,7 @@ function initDragAndDrop() {
 
 function removeFromAssembly(i) { assemblyOrder.splice(i, 1); renderTimeline(); }
 function clearAssembly() { assemblyOrder = []; renderTimeline(); }
+function reassemble() { state.status = 'clips_ready'; renderPhaseButtons(); }
 
 let assemblyGap = 1.0;
 function adjustGap(delta) {

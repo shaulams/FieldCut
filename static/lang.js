@@ -52,6 +52,7 @@ const LANGS = {
     save_project: "save project",
     gap_label: "gap between clips",
     download_output: "⬇ download rough cut",
+    reassemble: "↺ re-assemble",
     export_paper_edit: "export final transcript (.docx)",
     paper_edit_ready: "final transcript ready!",
 
@@ -163,6 +164,7 @@ const LANGS = {
     save_project: "שמור פרויקט",
     gap_label: "הפסקה בין קליפים",
     download_output: "⬇ הורד קובץ גמר",
+    reassemble: "↺ הרכב מחדש",
     export_paper_edit: "ייצוא תמלול סופי (.docx)",
     paper_edit_ready: "תמלול סופי מוכן!",
 

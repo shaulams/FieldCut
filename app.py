@@ -740,18 +740,28 @@ def export_paper_edit():
     assembly_order = data.get("order", [])
 
     state = load_state()
-    clips_map = {c["id"]: c for c in state.get("clips", [])}
+    # Merge text_clips and cut clips so start/end are always available
+    clips_map = {c["id"]: c for c in state.get("text_clips", [])}
+    clips_map.update({c["id"]: c for c in state.get("clips", [])})
     narration_map = {n["name"]: n for n in state.get("narration", [])}
+    narr_clips_map = {c["id"]: c for c in state.get("narr_text_clips", [])}
 
-    # Build word-level lookup: clip_id → text
+    # Build clip_id → text lookup from text_clips (primary) and legacy segment clip_id
     clip_text = {}
+    for clip in state.get("text_clips", []):
+        if clip.get("text"):
+            clip_text[clip["id"]] = clip["text"]
+    for clip in state.get("narr_text_clips", []):
+        if clip.get("text"):
+            clip_text[clip["id"]] = clip["text"]
+    # Legacy fallback: segments with clip_id set
     for seg in state.get("transcript", []):
         cid = seg.get("clip_id")
-        if cid:
+        if cid and cid not in clip_text:
             clip_text[cid] = clip_text.get(cid, "") + seg.get("text", "")
     for seg in state.get("narration_transcript", []):
         cid = seg.get("clip_id")
-        if cid:
+        if cid and cid not in clip_text:
             clip_text[cid] = clip_text.get(cid, "") + seg.get("text", "")
 
     doc = Document()

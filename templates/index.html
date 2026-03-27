@@ -200,6 +200,24 @@
   .drawer-project-meta { font-family: var(--mono); font-size: 9px; color: var(--text3); }
   .drawer-empty { font-family: var(--mono); font-size: 10px; color: var(--text3); text-align: center; padding: 32px 16px; }
   .drawer-footer { padding: 12px; border-top: 1px solid var(--border); }
+  .drawer-project-delete { background: none; border: none; color: var(--text3); cursor: pointer; font-size: 14px; padding: 2px 6px; opacity: 0; transition: opacity 0.15s; }
+  .drawer-project:hover .drawer-project-delete { opacity: 1; }
+  .drawer-project-delete:hover { color: #e06060; }
+
+  /* SEARCH BAR */
+  .search-bar { display: none; padding: 0 24px 8px; }
+  .search-bar.active { display: flex; gap: 6px; align-items: center; }
+  .search-bar input { flex: 1; background: var(--bg3); border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: var(--mono); font-size: 11px; padding: 5px 8px; outline: none; }
+  .search-bar input:focus { border-color: var(--green); }
+  .search-bar .search-nav { font-family: var(--mono); font-size: 9px; color: var(--text3); white-space: nowrap; }
+  .search-bar button { background: none; border: 1px solid var(--border); border-radius: 4px; color: var(--text2); cursor: pointer; padding: 3px 8px; font-size: 11px; }
+  .search-bar button:hover { border-color: var(--green); color: var(--green); }
+  .w.search-match { background: rgba(255,200,0,0.25); outline: 1px solid rgba(255,200,0,0.4); }
+  .w.search-current { background: rgba(255,200,0,0.5); outline: 2px solid rgba(255,180,0,0.8); }
+
+  /* AUTO-SAVE INDICATOR */
+  .autosave-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); opacity: 0; transition: opacity 0.3s; margin-left: 4px; display: inline-block; vertical-align: middle; }
+  .autosave-dot.visible { opacity: 1; }
 </style>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Heebo:wght@300;400;500&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
@@ -214,6 +232,7 @@
   <button class="topbar-btn" onclick="toggleProjectsDrawer()" data-i18n="projects"></button>
   <button class="topbar-btn" onclick="newProject()" data-i18n="new_project"></button>
   <span class="status-pill status-idle" id="status-pill" data-i18n="idle"></span>
+  <span class="autosave-dot" id="autosave-dot" title="Auto-saved"></span>
   <button class="lang-btn" id="lang-toggle" onclick="cycleLang()">EN</button>
   <button class="topbar-btn" id="theme-toggle" onclick="toggleTheme()" title="Toggle light/dark mode" style="padding:4px 8px;font-size:13px;border:none">&#9790;</button>
 </div>
@@ -277,6 +296,13 @@
           <button class="btn btn-primary" onclick="document.getElementById('audio-input').click()" style="width:auto;margin-top:10px;padding:8px 20px" data-i18n="choose_file"></button>
         </div>
         <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
+        <div class="search-bar" id="search-bar">
+          <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" oninput="doSearch()" onkeydown="searchKeydown(event)">
+          <span class="search-nav" id="search-nav"></span>
+          <button onclick="searchNav(-1)">&uarr;</button>
+          <button onclick="searchNav(1)">&darr;</button>
+          <button onclick="closeSearch()">&times;</button>
+        </div>
         <div id="transcript-body"></div>
       </div>
     </div>
@@ -513,6 +539,8 @@ async function init() {
   updateProjectName();
   if (state.filename) document.getElementById('file-info').textContent = state.filename;
   renderAll();
+  lastStateJson = JSON.stringify(state);
+  startAutoSave();
 }
 
 function renderAll() {
@@ -789,11 +817,14 @@ async function markSelection() {
   toolbar.classList.remove('visible');
   window.getSelection().removeAllRanges();
 
-  await fetch('/add_clip', {
+  const sel = { ...currentSelection };
+  const addRes = await fetch('/add_clip', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(currentSelection)
+    body: JSON.stringify(sel)
   });
+  const addData = await addRes.json();
+  pushUndo({ type: 'add', clipId: addData.clip_id, start: sel.start, end: sel.end, text: sel.text, source: sel.source });
 
   const res = await fetch('/state');
   state = await res.json();
@@ -855,6 +886,11 @@ function renderNarrClipsList() {
 }
 
 async function removeClip(id, source) {
+  // Find clip data for undo before removing
+  const clipList = source === 'narration' ? (state.narr_text_clips || []) : (state.text_clips || []);
+  const clip = clipList.find(c => c.id === id);
+  if (clip) pushUndo({ type: 'remove', clipId: id, start: clip.start, end: clip.end, text: clip.text, source: source });
+
   await fetch('/remove_clip', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1225,9 +1261,10 @@ async function loadProjectList() {
   body.innerHTML = data.projects.map(function(name) {
     const isActive = name === currentName;
     const escaped = name.replace(/'/g, "\\'").replace(/"/g, '&quot;');
-    return '<div class="drawer-project' + (isActive ? ' active' : '') + '" onclick="loadProject(\'' + escaped + '\')">'
-      + '<span class="drawer-project-name">' + name + '</span>'
+    return '<div class="drawer-project' + (isActive ? ' active' : '') + '">'
+      + '<span class="drawer-project-name" onclick="loadProject(\'' + escaped + '\')">' + name + '</span>'
       + (isActive ? '<span class="drawer-project-meta">' + t('current') + '</span>' : '')
+      + '<button class="drawer-project-delete" onclick="event.stopPropagation();deleteProject(\'' + escaped + '\')" title="Delete">&times;</button>'
       + '</div>';
   }).join('');
 }
@@ -1242,6 +1279,239 @@ async function loadProject(name) {
   const data = await res.json();
   if (data.error) { alert(data.error); return; }
   window.location.reload();
+}
+
+async function deleteProject(name) {
+  if (!confirm(t('delete_confirm', { name: name }))) return;
+  const res = await fetch('/delete_project', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name })
+  });
+  const data = await res.json();
+  if (data.error) { alert(data.error); return; }
+  // If we deleted the current project, clear the name
+  if (state.project_name === name) {
+    state.project_name = null;
+    updateProjectName();
+  }
+  loadProjectList();
+}
+
+// ── KEYBOARD SHORTCUTS ──
+document.addEventListener('keydown', (e) => {
+  // Ignore when typing in inputs
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+    // Only handle Escape in inputs
+    if (e.key === 'Escape') { e.target.blur(); closeSearch(); }
+    return;
+  }
+
+  // Ctrl/Cmd+S — save project
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    saveCurrentProject();
+    return;
+  }
+
+  // Ctrl/Cmd+F — open search
+  if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+    e.preventDefault();
+    openSearch();
+    return;
+  }
+
+  // Ctrl/Cmd+Z — undo
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === 'z') {
+    e.preventDefault();
+    undoClip();
+    return;
+  }
+
+  // Ctrl/Cmd+Shift+Z — redo
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'z') {
+    e.preventDefault();
+    redoClip();
+    return;
+  }
+
+  // Space — play/pause
+  if (e.key === ' ' || e.code === 'Space') {
+    e.preventDefault();
+    if (!snippetAudio.paused) { snippetAudio.pause(); }
+    else if (currentSelection) { playSelection(); }
+    return;
+  }
+
+  // Escape — deselect, close drawers
+  if (e.key === 'Escape') {
+    document.getElementById('sel-toolbar').classList.remove('visible');
+    closeProjectsDrawer();
+    closeSearch();
+    window.getSelection().removeAllRanges();
+    currentSelection = null;
+    return;
+  }
+
+  // 1, 2, 3 — jump to phase
+  if (e.key === '1') { goToPhase(1); return; }
+  if (e.key === '2') { goToPhase(2); return; }
+  if (e.key === '3') { goToPhase(3); return; }
+});
+
+// ── AUTO-SAVE ──
+let autoSaveInterval = null;
+let lastStateJson = '';
+
+function startAutoSave() {
+  autoSaveInterval = setInterval(() => {
+    const current = JSON.stringify(state);
+    if (current !== lastStateJson && state.project_name) {
+      lastStateJson = current;
+      fetch('/save_project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: state.project_name })
+      }).then(() => {
+        const dot = document.getElementById('autosave-dot');
+        dot.classList.add('visible');
+        setTimeout(() => dot.classList.remove('visible'), 1500);
+      });
+    }
+  }, 30000); // Every 30 seconds
+}
+
+// ── UNDO/REDO ──
+let undoStack = [];
+let redoStack = [];
+
+function pushUndo(clipData) {
+  undoStack.push(clipData);
+  redoStack = []; // Clear redo on new action
+  if (undoStack.length > 50) undoStack.shift();
+}
+
+async function undoClip() {
+  if (undoStack.length === 0) return;
+  const action = undoStack.pop();
+
+  if (action.type === 'add') {
+    // Undo an add = remove the clip
+    await fetch('/remove_clip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: action.clipId, source: action.source })
+    });
+    redoStack.push(action);
+  } else if (action.type === 'remove') {
+    // Undo a remove = re-add the clip
+    await fetch('/add_clip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start: action.start, end: action.end, text: action.text, source: action.source })
+    });
+    redoStack.push(action);
+  }
+
+  const res = await fetch('/state');
+  state = await res.json();
+  renderAll();
+}
+
+async function redoClip() {
+  if (redoStack.length === 0) return;
+  const action = redoStack.pop();
+
+  if (action.type === 'add') {
+    // Redo an add = add again
+    await fetch('/add_clip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start: action.start, end: action.end, text: action.text, source: action.source })
+    });
+    undoStack.push(action);
+  } else if (action.type === 'remove') {
+    // Redo a remove = remove again
+    await fetch('/remove_clip', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: action.clipId, source: action.source })
+    });
+    undoStack.push(action);
+  }
+
+  const res = await fetch('/state');
+  state = await res.json();
+  renderAll();
+}
+
+// ── SEARCH ──
+let searchMatches = [];
+let searchIndex = -1;
+
+function openSearch() {
+  const bar = document.getElementById('search-bar');
+  bar.classList.add('active');
+  document.getElementById('search-input').focus();
+}
+
+function closeSearch() {
+  const bar = document.getElementById('search-bar');
+  bar.classList.remove('active');
+  document.getElementById('search-input').value = '';
+  clearSearchHighlights();
+  searchMatches = [];
+  searchIndex = -1;
+  document.getElementById('search-nav').textContent = '';
+}
+
+function doSearch() {
+  clearSearchHighlights();
+  const query = document.getElementById('search-input').value.trim().toLowerCase();
+  if (!query) { searchMatches = []; searchIndex = -1; document.getElementById('search-nav').textContent = ''; return; }
+
+  searchMatches = [];
+  document.querySelectorAll('#transcript-body .w, #narration-body .w').forEach(span => {
+    if (span.textContent.toLowerCase().includes(query)) {
+      span.classList.add('search-match');
+      searchMatches.push(span);
+    }
+  });
+
+  searchIndex = searchMatches.length > 0 ? 0 : -1;
+  updateSearchNav();
+  if (searchIndex >= 0) scrollToMatch();
+}
+
+function searchNav(dir) {
+  if (searchMatches.length === 0) return;
+  searchIndex = (searchIndex + dir + searchMatches.length) % searchMatches.length;
+  updateSearchNav();
+  scrollToMatch();
+}
+
+function searchKeydown(e) {
+  if (e.key === 'Enter') { searchNav(e.shiftKey ? -1 : 1); e.preventDefault(); }
+  if (e.key === 'Escape') { closeSearch(); }
+}
+
+function updateSearchNav() {
+  const nav = document.getElementById('search-nav');
+  if (searchMatches.length === 0) { nav.textContent = '0/0'; return; }
+  nav.textContent = (searchIndex + 1) + '/' + searchMatches.length;
+  // Update current highlight
+  searchMatches.forEach(s => s.classList.remove('search-current'));
+  if (searchIndex >= 0) searchMatches[searchIndex].classList.add('search-current');
+}
+
+function scrollToMatch() {
+  if (searchIndex < 0 || !searchMatches[searchIndex]) return;
+  searchMatches[searchIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function clearSearchHighlights() {
+  document.querySelectorAll('.search-match').forEach(el => el.classList.remove('search-match', 'search-current'));
 }
 
 init();

@@ -94,6 +94,12 @@ const LANGS = {
     // Upload
     choose_file: "choose file",
 
+    // Search
+    search_placeholder: "Search transcript…",
+
+    // Delete project
+    delete_confirm: 'Delete project "{name}"? This cannot be undone.',
+
     // Misc
     passages: "passages",
     clips_word: "clips",
@@ -194,6 +200,12 @@ const LANGS = {
 
     // Upload
     choose_file: "בחר קובץ",
+
+    // Search
+    search_placeholder: "חיפוש בתמלול…",
+
+    // Delete project
+    delete_confirm: 'למחוק את הפרויקט "{name}"? לא ניתן לבטל.',
 
     // Misc
     passages: "קטעים",

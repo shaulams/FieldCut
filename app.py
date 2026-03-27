@@ -829,6 +829,21 @@ def load_project():
     return jsonify({"ok": True, "state": state})
 
 
+@app.route("/delete_project", methods=["POST"])
+def delete_project():
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    if not name:
+        return jsonify({"error": "Project name is required"}), 400
+
+    project_dir = os.path.join("projects", name)
+    if not os.path.exists(project_dir):
+        return jsonify({"error": "Project not found"}), 404
+
+    shutil.rmtree(project_dir)
+    return jsonify({"ok": True})
+
+
 @app.route("/reset", methods=["POST"])
 def reset():
     if os.path.exists(STATE_FILE):

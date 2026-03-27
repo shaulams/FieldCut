@@ -1529,7 +1529,7 @@ async function assembleRoughCut() {
   const data = await res.json();
   if (data.error) { setStatus('error', data.error); return; }
   startProgressPolling();
-  pollUntilStatus('assembled', () => {
+  pollUntilStatus('assembled', async () => {
     stopProgressPolling();
     setStatus('done', t('rough_cut_ready'));
     const res2 = await fetch('/state');

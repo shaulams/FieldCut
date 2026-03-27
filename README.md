@@ -65,6 +65,21 @@ Field Cut supports saving and loading multiple projects. Click **"projects"** in
 - **Transcription:** OpenAI Whisper API
 - **State:** JSON file (no database needed)
 
+## Adding a new language
+
+Field Cut ships with English and Hebrew. Adding a new language takes ~10 minutes:
+
+1. Open `static/lang.js`
+2. Copy the `en` block and paste it as a new key (e.g. `fr` for French, `ar` for Arabic)
+3. Translate every string value — keep the keys unchanged
+4. Set `_meta.name` to the language's own name (e.g. `"Français"`) and `_meta.dir` to `"ltr"` or `"rtl"`
+5. The language picker in the top bar will automatically include it
+
+**Notes:**
+- Keys like `upload_prompt`, `cut_clips` etc. must stay exactly as they are
+- Use `{count}` and `{name}` placeholders in strings that have them — they get replaced at runtime
+- RTL languages (Hebrew, Arabic) should set `dir: "rtl"` — the layout adapts automatically
+
 ## Contributing
 
 Contributions are welcome! Feel free to open issues or submit pull requests.

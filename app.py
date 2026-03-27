@@ -238,6 +238,38 @@ def add_clip():
     save_state(state)
     return jsonify({"ok": True, "clip_id": clip_id, "clips": clips})
 
+@app.route("/trim_clip", methods=["POST"])
+def trim_clip():
+    """Fine-tune start/end time of a marked clip."""
+    data = request.json
+    clip_id = data["id"]
+    source = data.get("source", "interview")
+    new_start = data.get("start")
+    new_end = data.get("end")
+
+    state = load_state()
+    clips = state.get("narr_text_clips" if source == "narration" else "text_clips", [])
+
+    for c in clips:
+        if c["id"] == clip_id:
+            if new_start is not None:
+                c["start"] = round(max(0, float(new_start)), 3)
+            if new_end is not None:
+                c["end"] = round(float(new_end), 3)
+            # Ensure start < end with at least 0.1s
+            if c["start"] >= c["end"]:
+                c["end"] = c["start"] + 0.1
+            break
+
+    if source == "narration":
+        state["narr_text_clips"] = clips
+    else:
+        state["text_clips"] = clips
+
+    save_state(state)
+    return jsonify({"ok": True})
+
+
 @app.route("/remove_clip", methods=["POST"])
 def remove_clip():
     """Remove a clip by ID."""

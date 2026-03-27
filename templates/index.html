@@ -158,6 +158,18 @@
   .clip-x::before { content: ''; position: absolute; inset: -10px; }
   .clip-x:hover { color: #e06060; }
   .clip-text-preview { font-family: var(--sans); font-size: 12px; color: var(--text2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
+  .clip-expand { font-size: 13px; color: var(--text3); cursor: pointer; flex-shrink: 0; padding: 4px; position: relative; line-height: 1; transition: color 0.15s, transform 0.15s; }
+  .clip-expand::before { content: ''; position: absolute; inset: -8px; }
+  .clip-expand:hover { color: var(--text2); }
+  .clip-item.trimming .clip-expand { color: var(--green); transform: rotate(180deg); }
+  .clip-trim-row { display: none; padding: 6px 0 4px; gap: 10px; align-items: center; flex-wrap: wrap; border-top: 1px solid var(--border); margin-top: 4px; }
+  .clip-item.trimming .clip-trim-row { display: flex; }
+  .trim-field { display: flex; align-items: center; gap: 4px; flex: 1; }
+  .trim-field label { font-family: var(--sans); font-size: 11px; color: var(--text3); min-width: 28px; }
+  .trim-adj { width: 22px; height: 22px; border: 1px solid var(--border); border-radius: 4px; background: transparent; color: var(--text2); cursor: pointer; font-size: 14px; line-height: 1; display: flex; align-items: center; justify-content: center; transition: border-color 0.15s, color 0.15s; padding: 0; }
+  .trim-adj:hover { border-color: var(--green); color: var(--green); }
+  .trim-adj:active { transform: scale(0.96); }
+  .trim-val { font-family: var(--mono); font-size: 11px; color: var(--text); min-width: 38px; text-align: center; font-variant-numeric: tabular-nums; }
 
   .btn { width: 100%; padding: 9px 14px; border-radius: 6px; font-family: var(--mono); font-size: 12px; letter-spacing: 0.03em; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; text-align: center; transition: background 0.15s, color 0.15s, border-color 0.15s; font-weight: 500; }
   .btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
@@ -885,12 +897,27 @@ function renderClipsList() {
     const dur = formatDur(c.end - c.start);
     const isCut = cutIds.has(c.id);
     const preview = c.text.length > 25 ? c.text.slice(0, 25) + '\u2026' : c.text;
-    return `<div class="clip-item" data-start="${c.start}" data-end="${c.end}" data-source="${src}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()">
+    return `<div class="clip-item" id="clip-item-${c.id}" data-start="${c.start}" data-end="${c.end}" data-source="${src}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()" style="flex-wrap:wrap">
       <span class="clip-num">${c.id.replace('clip_','')}</span>
       <span class="clip-text-preview" title="${c.text}">${preview}</span>
       <span class="clip-dur">${dur}</span>
       ${isCut ? '<span style="color:var(--green);font-size:10px">\u2713</span>' : ''}
+      <span class="clip-expand" onclick="toggleTrim('${c.id}','interview')" title="trim">&#x25BE;</span>
       <span class="clip-x" onclick="removeClip('${c.id}','interview')">\u00d7</span>
+      <div class="clip-trim-row" style="width:100%">
+        <div class="trim-field">
+          <label>start</label>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','interview','start',-0.1)">−</button>
+          <span class="trim-val" id="trim-start-${c.id}">${c.start.toFixed(1)}s</span>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','interview','start',0.1)">+</button>
+        </div>
+        <div class="trim-field">
+          <label>end</label>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','interview','end',-0.1)">−</button>
+          <span class="trim-val" id="trim-end-${c.id}">${c.end.toFixed(1)}s</span>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','interview','end',0.1)">+</button>
+        </div>
+      </div>
     </div>`;
   }).join('');
 }
@@ -907,15 +934,69 @@ function renderNarrClipsList() {
     const dur = formatDur(c.end - c.start);
     const isCut = cutNames.has(c.id + '.wav');
     const preview = c.text.length > 25 ? c.text.slice(0, 25) + '\u2026' : c.text;
-    return `<div class="clip-item" data-start="${c.start}" data-end="${c.end}" data-source="${narrSrc}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()">
+    return `<div class="clip-item" id="clip-item-${c.id}" data-start="${c.start}" data-end="${c.end}" data-source="${narrSrc}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()" style="flex-wrap:wrap">
       <span class="clip-num" style="color:var(--blue)">${c.id.replace('narr_','')}</span>
       <span class="clip-text-preview" title="${c.text}">${preview}</span>
       <span class="clip-dur">${dur}</span>
       ${isCut ? '<span style="color:var(--blue);font-size:10px">\u2713</span>' : ''}
+      <span class="clip-expand" onclick="toggleTrim('${c.id}','narration')" title="trim">&#x25BE;</span>
       <span class="clip-x" onclick="removeClip('${c.id}','narration')">\u00d7</span>
+      <div class="clip-trim-row" style="width:100%">
+        <div class="trim-field">
+          <label>start</label>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','narration','start',-0.1)">−</button>
+          <span class="trim-val" id="trim-start-${c.id}">${c.start.toFixed(1)}s</span>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','narration','start',0.1)">+</button>
+        </div>
+        <div class="trim-field">
+          <label>end</label>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','narration','end',-0.1)">−</button>
+          <span class="trim-val" id="trim-end-${c.id}">${c.end.toFixed(1)}s</span>
+          <button class="trim-adj" onclick="adjustTrim('${c.id}','narration','end',0.1)">+</button>
+        </div>
+      </div>
     </div>`;
   }).join('');
   container.innerHTML += '<br>';
+}
+
+function toggleTrim(id, source) {
+  stopClipPreview();
+  const el = document.getElementById('clip-item-' + id);
+  if (el) el.classList.toggle('trimming');
+}
+
+async function adjustTrim(id, source, field, delta) {
+  stopClipPreview();
+  const valEl = document.getElementById(`trim-${field}-${id}`);
+  if (!valEl) return;
+  const current = parseFloat(valEl.textContent);
+  const newVal = Math.round((current + delta) * 10) / 10;
+  if (newVal < 0) return;
+  valEl.textContent = newVal.toFixed(1) + 's';
+
+  // Update dataset on parent for hover preview
+  const item = document.getElementById('clip-item-' + id);
+  if (item) item.dataset[field] = newVal;
+
+  await fetch('/trim_clip', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ id, source, [field]: newVal })
+  });
+
+  // Refresh state to keep clip list in sync
+  const s = await fetch('/state').then(r => r.json());
+  const clips = source === 'narration' ? (s.narr_text_clips || []) : (s.text_clips || []);
+  const c = clips.find(c => c.id === id);
+  if (c) {
+    const startEl = document.getElementById('trim-start-' + id);
+    const endEl = document.getElementById('trim-end-' + id);
+    if (startEl) startEl.textContent = c.start.toFixed(1) + 's';
+    if (endEl) endEl.textContent = c.end.toFixed(1) + 's';
+    const durEl = item && item.querySelector('.clip-dur');
+    if (durEl) durEl.textContent = formatDur(c.end - c.start);
+  }
 }
 
 let previewTimer = null;

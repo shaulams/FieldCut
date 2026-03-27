@@ -778,8 +778,20 @@ def export_paper_edit():
             rtl = OxmlElement('w:rtl')
             rPr.append(rtl)
 
-    title = doc.add_heading(state.get("project_name", "Paper Edit"), 0)
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Set document-wide RTL (bidi) on the default paragraph style
+    from docx.oxml.ns import qn as _qn
+    doc_defaults = doc.styles['Normal']._element
+    pPr_default = doc_defaults.get_or_add_pPr() if hasattr(doc_defaults, 'get_or_add_pPr') else None
+    normal_style = doc.styles['Normal']
+    normal_style.font.name = 'David'
+    normal_style.font.size = Pt(12)
+    # Apply RTL to the Normal style paragraph properties
+    normal_pPr = normal_style._element.get_or_add_pPr()
+    normal_pPr.append(OxmlElement('w:bidi'))
+
+    title = doc.add_heading(state.get("project_name", "תמלול סופי"), 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    set_rtl(title)
 
     for i, item in enumerate(assembly_order, 1):
         item_type = item.get("type")

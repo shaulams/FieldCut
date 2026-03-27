@@ -52,8 +52,8 @@ const LANGS = {
     save_project: "save project",
     gap_label: "gap between clips",
     download_output: "⬇ download rough cut",
-    export_paper_edit: "export paper edit (.docx)",
-    paper_edit_ready: "paper edit ready!",
+    export_paper_edit: "export final transcript (.docx)",
+    paper_edit_ready: "final transcript ready!",
 
     // Assembly empty states
     asm_empty: "drag clips and narration here to build the rough cut",
@@ -163,8 +163,8 @@ const LANGS = {
     save_project: "שמור פרויקט",
     gap_label: "הפסקה בין קליפים",
     download_output: "⬇ הורד קובץ גמר",
-    export_paper_edit: "ייצוא עריכת נייר (.docx)",
-    paper_edit_ready: "עריכת הנייר מוכנה!",
+    export_paper_edit: "ייצוא תמלול סופי (.docx)",
+    paper_edit_ready: "תמלול סופי מוכן!",
 
     // Assembly empty states
     asm_empty: "גרור קליפים וקריינות לכאן כדי לבנות את הקובץ השלם",

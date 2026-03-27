@@ -73,6 +73,30 @@ def set_project_dir(path):
     for sub in ['uploads', 'clips', 'narration', 'output']:
         os.makedirs(os.path.join(path, sub), exist_ok=True)
 
+def friendly_error(e):
+    """Convert a raw exception into a short, human-readable error message."""
+    msg = str(e)
+    if "401" in msg or "invalid_api_key" in msg or "Incorrect API key" in msg:
+        return "Invalid API key — check OPENAI_API_KEY in your .env file"
+    if "429" in msg or "rate_limit" in msg or "quota" in msg:
+        return "OpenAI rate limit or quota exceeded — try again in a moment"
+    if "Connection" in msg or "timeout" in msg or "network" in msg.lower():
+        return "Network error — check your internet connection"
+    if "ffmpeg" in msg.lower():
+        return "ffmpeg error — make sure ffmpeg is installed (brew install ffmpeg)"
+    if "No such file" in msg:
+        return "Audio file not found — try uploading again"
+    # Trim raw API error JSON down to just the message field if present
+    if "'message':" in msg:
+        try:
+            import re
+            m = re.search(r"'message':\s*'([^']+)'", msg)
+            if m:
+                return m.group(1)[:120]
+        except Exception:
+            pass
+    return msg[:120]  # cap length so it fits in the UI
+
 def pdir(folder=""):
     """Return path to a subfolder in the active project directory, creating it if needed."""
     path = os.path.join(_active_project_dir, folder) if folder else _active_project_dir
@@ -262,7 +286,7 @@ def transcribe():
             progress.update(current=progress["total"], message="done", phase=None)
 
         except Exception as e:
-            state["status"] = f"error: {str(e)}"
+            state["status"] = f"error: {friendly_error(e)}"
             save_state(state)
             progress.update(phase=None, current=0, total=0, message="")
 
@@ -486,7 +510,7 @@ def cut_clips():
         progress.update(phase=None, current=len(clips), total=len(clips), message="done")
       except Exception as e:
         st = load_state()
-        st["status"] = f"error: clip cutting failed — {str(e)}"
+        st["status"] = f"error: {friendly_error(e)}"
         save_state(st)
         progress.update(phase=None, message="")
 
@@ -656,7 +680,7 @@ def process_narration():
             progress.update(phase=None, current=progress["total"], total=progress["total"], message="done")
 
         except Exception as e:
-            st["status"] = f"error: {str(e)}"
+            st["status"] = f"error: {friendly_error(e)}"
             save_state(st)
             progress.update(phase=None, current=0, total=0, message="")
 
@@ -794,7 +818,7 @@ def assemble():
                 progress.update(phase=None, current=len(file_paths), total=len(file_paths), message="done")
         except Exception as e:
             st = load_state()
-            st["status"] = f"error: assembly failed — {str(e)}"
+            st["status"] = f"error: {friendly_error(e)}"
             save_state(st)
             progress.update(phase=None, message="")
 

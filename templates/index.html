@@ -61,6 +61,13 @@
   .status-done { background: rgba(29,158,117,0.15); color: var(--green); border: 1px solid rgba(29,158,117,0.3); }
   .status-error { background: rgba(200,50,50,0.15); color: #e06060; border: 1px solid rgba(200,50,50,0.3); }
 
+  /* Error banner */
+  #error-banner { display: none; background: rgba(200,50,50,0.12); border-bottom: 1px solid rgba(200,50,50,0.35); color: #e06060; font-size: 13px; font-family: var(--sans); padding: 9px 16px; gap: 10px; align-items: center; }
+  #error-banner.visible { display: flex; }
+  #error-banner-msg { flex: 1; }
+  #error-banner-dismiss { background: none; border: none; color: #e06060; cursor: pointer; font-size: 16px; padding: 0 4px; opacity: 0.7; line-height: 1; }
+  #error-banner-dismiss:hover { opacity: 1; }
+
   /* LAYOUT */
   .main { display: grid; grid-template-columns: 1fr 320px; flex: 1; overflow: hidden; }
   .center { display: flex; flex-direction: column; overflow: hidden; }
@@ -301,6 +308,12 @@
   <span class="autosave-dot" id="autosave-dot" title="Auto-saved"></span>
   <button class="lang-btn" id="lang-toggle" onclick="cycleLang()" aria-label="Switch language">EN</button>
   <button class="topbar-btn" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode" title="Toggle light/dark mode" style="padding:4px 8px;font-size:13px;border:none">&#9790;</button>
+</div>
+
+<div id="error-banner">
+  <span>⚠️</span>
+  <span id="error-banner-msg"></span>
+  <button id="error-banner-dismiss" onclick="dismissError()" aria-label="Dismiss">×</button>
 </div>
 
 <!-- PROJECTS DRAWER -->
@@ -699,7 +712,7 @@ function startPolling() {
     } else if (s.status && s.status.startsWith('error')) {
       clearInterval(pollingInterval); pollingInterval = null;
       stopProgressPolling();
-      setStatus('error', s.status);
+      setStatus('error', s.status.replace(/^error:\s*/, ''));
     }
   }, 2000);
 }
@@ -1705,15 +1718,35 @@ function pollUntilStatus(target, callback) {
     const res = await fetch('/status');
     const s = await res.json();
     if (s.status === target) { clearInterval(iv); callback(); }
-    else if (s.status && s.status.startsWith('error')) { clearInterval(iv); stopProgressPolling(); setStatus('error', s.status); }
+    else if (s.status && s.status.startsWith('error')) { clearInterval(iv); stopProgressPolling(); setStatus('error', s.status.replace(/^error:\s*/, '')); }
   }, 500);
 }
 
 // ── HELPERS ──
 function setStatus(type, msg) {
   const pill = document.getElementById('status-pill');
-  pill.className = 'status-pill status-' + type;
-  pill.textContent = msg;
+  if (type === 'error') {
+    // Show full message in banner, keep pill as subtle indicator
+    pill.className = 'status-pill status-error';
+    pill.textContent = '⚠ error';
+    const banner = document.getElementById('error-banner');
+    document.getElementById('error-banner-msg').textContent = msg;
+    banner.classList.add('visible');
+  } else {
+    dismissError();
+    pill.className = 'status-pill status-' + type;
+    pill.textContent = msg;
+  }
+}
+
+function dismissError() {
+  document.getElementById('error-banner').classList.remove('visible');
+  const pill = document.getElementById('status-pill');
+  if (pill.classList.contains('status-error')) {
+    pill.className = 'status-pill status-idle';
+    pill.setAttribute('data-i18n', 'idle');
+    pill.textContent = t('idle');
+  }
 }
 function formatTime(secs) {
   const m = Math.floor(secs / 60), s = Math.floor(secs % 60);

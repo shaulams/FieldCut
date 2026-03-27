@@ -91,6 +91,9 @@ const LANGS = {
     click_to_rename: "Click to rename",
     click_to_name: "Click to name this project",
 
+    // Upload
+    choose_file: "choose file",
+
     // Misc
     passages: "passages",
     clips_word: "clips",
@@ -135,27 +138,27 @@ const LANGS = {
     narration_audio_title: "קובץ קריינות",
     upload_narration: "+ העלה קובץ קריינות",
     replace_narration: "↻ החלף קובץ קריינות",
-    transcribe_narration: "▶ תמלל קריינות",
+    transcribe_narration: "תמלל קריינות ◀",
     narration_clips_title: "קליפים מקריינות",
     cut_narration: "✂ חתוך קליפים מקריינות",
     skip_assembly: "דלג להרכבה ←",
     finish_assembly: "סיום שלב — הרכבה ←",
 
     // Phase 3: Assembly
-    assembly_label: "הרכבה — גרור קליפים לבניית הגרסה הגסה",
+    assembly_label: "הרכבה — גרור קליפים לבניית הקובץ השלם",
     interview_clips: "קליפים מראיון",
     narration_clips: "קליפים מקריינות",
-    assemble: "▶ הרכב גרסה גסה",
+    assemble: "הרכב קובץ שלם ◀",
     clear: "נקה",
     save_project: "שמור פרויקט",
 
     // Assembly empty states
-    asm_empty: "גרור קליפים וקריינות לכאן כדי לבנות את הגרסה הגסה",
+    asm_empty: "גרור קליפים וקריינות לכאן כדי לבנות את הקובץ השלם",
     asm_no_clips: "חתוך קליפים קודם",
     asm_no_narration: "אין קליפים מקריינות",
 
     // Selection toolbar
-    play: "▶ נגן",
+    play: "נגן ◀",
     mark_clip: "✂ סמן קליפ",
 
     // Dialogs & prompts
@@ -180,7 +183,7 @@ const LANGS = {
     cutting_narration: "חותך קליפים מקריינות…",
     narration_cut: "קליפים מקריינות נחתכו",
     assembling: "מרכיב…",
-    rough_cut_ready: "הגרסה הגסה מוכנה!",
+    rough_cut_ready: "הקובץ השלם מוכנה!",
     server_error: "שגיאת שרת",
     transcription_failed: "התמלול נכשל",
 
@@ -188,6 +191,9 @@ const LANGS = {
     untitled: "ללא שם",
     click_to_rename: "לחץ לשינוי שם",
     click_to_name: "לחץ לתת שם לפרויקט",
+
+    // Upload
+    choose_file: "בחר קובץ",
 
     // Misc
     passages: "קטעים",

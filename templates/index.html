@@ -258,9 +258,23 @@
   <div class="center">
       <div class="transcript-pane" id="transcript-pane">
         <div class="pane-label" data-i18n="transcript_label"></div>
-        <div class="upload-zone" id="upload-zone" onclick="document.getElementById('audio-input').click()">
-          <p data-i18n="upload_prompt"></p>
+        <div class="upload-zone" id="upload-zone">
+          <p data-i18n="upload_prompt" onclick="document.getElementById('audio-input').click()" style="cursor:pointer"></p>
           <small data-i18n="upload_hint"></small>
+          <div style="margin-top:10px">
+            <select id="whisper-lang" style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;color:var(--text);font-family:var(--mono);font-size:10px;padding:4px 8px;cursor:pointer">
+              <option value="he">עברית (Hebrew)</option>
+              <option value="en">English</option>
+              <option value="ar">العربية (Arabic)</option>
+              <option value="es">Español (Spanish)</option>
+              <option value="fr">Français (French)</option>
+              <option value="de">Deutsch (German)</option>
+              <option value="ru">Русский (Russian)</option>
+              <option value="pt">Português (Portuguese)</option>
+              <option value="auto">Auto-detect</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="document.getElementById('audio-input').click()" style="width:auto;margin-top:10px;padding:8px 20px" data-i18n="choose_file"></button>
         </div>
         <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
         <div id="transcript-body"></div>
@@ -525,8 +539,10 @@ async function uploadAndTranscribe(event) {
   document.getElementById('upload-zone').style.display = 'none';
   document.getElementById('file-info').textContent = file.name;
   setStatus('working', t('transcribing'));
+  const whisperLang = document.getElementById('whisper-lang').value;
   const formData = new FormData();
   formData.append('file', file);
+  formData.append('language', whisperLang);
   const res = await fetch('/transcribe', { method: 'POST', body: formData });
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: t('server_error') }));

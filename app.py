@@ -107,6 +107,9 @@ def transcribe():
     filename = f.filename
     filepath = os.path.join("uploads", filename)
     f.save(filepath)
+    whisper_lang = request.form.get("language", "he")
+    if whisper_lang == "auto":
+        whisper_lang = None
 
     def do_transcribe():
         state = load_state()
@@ -129,14 +132,17 @@ def transcribe():
             else:
                 progress.update(phase="transcribe", current=0, total=2, message="sending to Whisper…")
 
+            whisper_kwargs = {
+                "model": "whisper-1",
+                "response_format": "verbose_json",
+                "timestamp_granularities": ["word", "segment"],
+            }
+            if whisper_lang:
+                whisper_kwargs["language"] = whisper_lang
+
             with open(upload_path, "rb") as audio_file:
-                result = client.audio.transcriptions.create(
-                    model="whisper-1",
-                    file=audio_file,
-                    language="he",
-                    response_format="verbose_json",
-                    timestamp_granularities=["word", "segment"]
-                )
+                whisper_kwargs["file"] = audio_file
+                result = client.audio.transcriptions.create(**whisper_kwargs)
 
             # Store word-level timestamps
             words = []

@@ -78,6 +78,21 @@
   .paragraph { margin-bottom: 16px; line-height: 1.85; position: relative; font-size: 15px; }
   .para-ts { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-left: 8px; cursor: pointer; user-select: none; font-variant-numeric: tabular-nums; }
   .para-ts:hover { color: var(--text2); }
+
+  /* Speaker badges */
+  .spk-badge { display: inline-block; font-family: var(--mono); font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 3px; margin-inline-end: 6px; cursor: pointer; user-select: none; vertical-align: middle; transition: opacity 0.15s; }
+  .spk-badge:hover { opacity: 0.75; }
+  .spk-S1 { background: rgba(29,158,117,0.2); color: var(--green); }
+  .spk-S2 { background: rgba(55,138,221,0.2); color: var(--blue); }
+  .spk-S3 { background: rgba(200,140,50,0.2); color: #c88c32; }
+  .spk-S4 { background: rgba(160,80,180,0.2); color: #a050b4; }
+
+  /* Speaker legend */
+  #speaker-legend { display: none; flex-wrap: wrap; gap: 6px; padding: 8px 0 4px; }
+  .spk-legend-item { display: flex; align-items: center; gap: 5px; font-size: 12px; }
+  .spk-legend-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .spk-legend-name { font-family: var(--sans); color: var(--text2); cursor: pointer; border-bottom: 1px dashed var(--border); }
+  .spk-legend-name:hover { color: var(--text); border-bottom-color: var(--text); }
   .w { cursor: text; color: var(--text); transition: background 0.1s; border-radius: 2px; padding: 1px 0; font-weight: 400; }
   .w:hover { background: rgba(255,255,255,0.04); }
   .w.clip-highlight { background: var(--green-dim); color: var(--text); }
@@ -359,6 +374,7 @@
           <button class="btn btn-primary" onclick="document.getElementById('audio-input').click()" style="width:auto;margin-top:10px;padding:8px 20px" data-i18n="choose_file"></button>
         </div>
         <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
+        <div id="speaker-legend"></div>
         <div class="search-bar" id="search-bar">
           <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" aria-label="Search transcript" oninput="doSearch()" onkeydown="searchKeydown(event)">
           <span class="search-nav" id="search-nav"></span>
@@ -698,13 +714,25 @@ function renderTranscript() {
   document.getElementById('upload-zone').style.display = 'none';
 
   if (words.length === 0) {
-    container.innerHTML = segments.map(seg =>
-      `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span> ${seg.text}</div>`
-    ).join('');
+    renderSpeakerLegend();
+    const names0 = state.speaker_names || {};
+    const multi0 = new Set(segments.map(s => s.speaker || 'S1')).size > 1;
+    container.innerHTML = segments.map(seg => {
+      const spk = seg.speaker || 'S1';
+      const badge = (multi0 || spk !== 'S1')
+        ? `<span class="spk-badge spk-${spk}" onclick="renameSpeaker('${spk}')" title="Click to rename">${names0[spk] || spk}</span>`
+        : '';
+      return `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span>${badge} ${seg.text}</div>`;
+    }).join('');
     return;
   }
 
+  renderSpeakerLegend();
+
   const clips = state.text_clips || [];
+  const names = state.speaker_names || {};
+  const multiSpeaker = new Set(segments.map(s => s.speaker || 'S1')).size > 1;
+
   segments.forEach(seg => {
     const para = document.createElement('div');
     para.className = 'paragraph';
@@ -714,6 +742,18 @@ function renderTranscript() {
     tsBtn.textContent = formatTime(seg.start);
     tsBtn.onclick = () => playSnippet(state.source_file, seg.start, seg.end);
     para.appendChild(tsBtn);
+
+    // Speaker badge — always show when multi-speaker, hide when all S1
+    if (multiSpeaker || (seg.speaker && seg.speaker !== 'S1')) {
+      const spk = seg.speaker || 'S1';
+      const badge = document.createElement('span');
+      badge.className = 'spk-badge spk-' + spk;
+      badge.textContent = names[spk] || spk;
+      badge.title = 'Click to rename speaker';
+      badge.onclick = (e) => { e.stopPropagation(); renameSpeaker(spk); };
+      para.appendChild(badge);
+    }
+
     para.appendChild(document.createTextNode(' '));
 
     const segWords = words.filter(w => w.start >= seg.start - 0.05 && w.end <= seg.end + 0.05);
@@ -751,6 +791,43 @@ function renderTranscript() {
     container.appendChild(para);
   });
   buildWordSpanIndex();
+}
+
+// ── SPEAKER LEGEND + RENAME ──
+const SPK_COLORS = { S1: '#1d9e75', S2: '#378add', S3: '#c88c32', S4: '#a050b4' };
+
+function renderSpeakerLegend() {
+  const legend = document.getElementById('speaker-legend');
+  if (!legend) return;
+  const names = state.speaker_names || {};
+  const speakers = Object.keys(names);
+  if (speakers.length <= 1) { legend.style.display = 'none'; return; }
+  legend.style.display = 'flex';
+  legend.innerHTML = speakers.map(spk => {
+    const color = SPK_COLORS[spk] || '#888';
+    const name = names[spk] || spk;
+    return `<div class="spk-legend-item">
+      <div class="spk-legend-dot" style="background:${color}"></div>
+      <span class="spk-legend-name" onclick="renameSpeaker('${spk}')" title="Click to rename">${name}</span>
+    </div>`;
+  }).join('');
+}
+
+function renameSpeaker(spkId) {
+  const names = state.speaker_names || {};
+  const current = names[spkId] || spkId;
+  const newName = prompt(`Rename ${spkId}:`, current);
+  if (!newName || !newName.trim() || newName.trim() === current) return;
+  fetch('/rename_speaker', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ speaker_id: spkId, display_name: newName.trim() })
+  }).then(r => r.json()).then(data => {
+    if (data.ok) {
+      state.speaker_names = data.speaker_names;
+      renderTranscript();
+    }
+  });
 }
 
 // ── RENDER NARRATION WORD-LEVEL ──

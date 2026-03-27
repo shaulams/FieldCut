@@ -2,6 +2,57 @@ import os, json, subprocess, tempfile, threading, time, io, shutil, struct
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, Response
 
+# Optional diarization — requires HUGGINGFACE_TOKEN in .env
+_diarization_pipeline = None
+_diarization_lock = threading.Lock()
+
+def get_diarization_pipeline():
+    global _diarization_pipeline
+    token = os.environ.get("HUGGINGFACE_TOKEN")
+    if not token:
+        return None
+    with _diarization_lock:
+        if _diarization_pipeline is None:
+            try:
+                from pyannote.audio import Pipeline
+                _diarization_pipeline = Pipeline.from_pretrained(
+                    "pyannote/speaker-diarization-3.1",
+                    use_auth_token=token,
+                )
+                print("✓ Speaker diarization pipeline loaded")
+            except Exception as e:
+                print(f"⚠️  Diarization pipeline failed to load: {e}")
+                return None
+    return _diarization_pipeline
+
+def assign_speakers(segments, audio_path):
+    """Run pyannote diarization and assign speaker labels to segments."""
+    pipeline = get_diarization_pipeline()
+    if pipeline is None:
+        return segments  # no-op: keep S1 for all
+    try:
+        diarization = pipeline(audio_path)
+        # Build list of (start, end, speaker) turns
+        turns = [(turn.start, turn.end, speaker)
+                 for turn, _, speaker in diarization.itertracks(yield_label=True)]
+        # Map each segment to the speaker with the most overlap
+        speaker_map = {}  # pyannote label → S1/S2/...
+        for seg in segments:
+            best_speaker, best_overlap = "S1", 0.0
+            for t_start, t_end, spk in turns:
+                overlap = min(seg["end"], t_end) - max(seg["start"], t_start)
+                if overlap > best_overlap:
+                    best_overlap = overlap
+                    best_speaker = spk
+            # Normalise to S1/S2/... labels
+            if best_speaker not in speaker_map:
+                speaker_map[best_speaker] = f"S{len(speaker_map) + 1}"
+            seg["speaker"] = speaker_map[best_speaker]
+        return segments
+    except Exception as e:
+        print(f"⚠️  Diarization failed: {e}")
+        return segments
+
 # Load .env file if present (so OPENAI_API_KEY persists across sessions)
 try:
     from dotenv import load_dotenv
@@ -185,6 +236,20 @@ def transcribe():
                 })
 
             progress.update(current=progress["total"] - 1, message="processing segments…")
+
+            # Diarization (optional — only if HUGGINGFACE_TOKEN is set)
+            if os.environ.get("HUGGINGFACE_TOKEN"):
+                progress.update(message="detecting speakers…")
+                segments = assign_speakers(segments, filepath)
+
+            # Build speaker_names map from unique speakers in transcript
+            seen = []
+            for seg in segments:
+                spk = seg.get("speaker", "S1")
+                if spk not in seen:
+                    seen.append(spk)
+            speaker_names = {spk: spk for spk in seen}
+
             state["transcript"] = segments
             state["words"] = words
             state["text_clips"] = []
@@ -192,6 +257,7 @@ def transcribe():
             state["status"] = "transcribed"
             state["filename"] = filename
             state["transcription_language"] = whisper_lang or "auto"
+            state["speaker_names"] = speaker_names
             save_state(state)
             progress.update(current=progress["total"], message="done", phase=None)
 
@@ -1131,6 +1197,21 @@ def update_metadata():
             state[field] = data[field]
     save_state(state)
     return jsonify({"ok": True})
+
+
+@app.route("/rename_speaker", methods=["POST"])
+def rename_speaker():
+    data = request.json or {}
+    speaker_id = data.get("speaker_id", "").strip()   # e.g. "S1"
+    display_name = data.get("display_name", "").strip()  # e.g. "Interviewer"
+    if not speaker_id or not display_name:
+        return jsonify({"error": "speaker_id and display_name required"}), 400
+    state = load_state()
+    if "speaker_names" not in state:
+        state["speaker_names"] = {}
+    state["speaker_names"][speaker_id] = display_name
+    save_state(state)
+    return jsonify({"ok": True, "speaker_names": state["speaker_names"]})
 
 
 @app.route("/duplicate_project", methods=["POST"])

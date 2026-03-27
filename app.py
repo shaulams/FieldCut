@@ -1,4 +1,4 @@
-import os, json, subprocess, tempfile, threading, time, io, shutil
+import os, json, subprocess, tempfile, threading, time, io, shutil, struct
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, Response
 
@@ -794,6 +794,48 @@ def export_paper_edit():
 
 
 # ─── AUDIO ────────────────────────────────────────────────
+
+@app.route("/waveform")
+def waveform():
+    """Extract waveform amplitude data for canvas rendering."""
+    filepath = request.args.get("file", "")
+    n_points = int(request.args.get("points", 1000))
+
+    if not filepath or not os.path.exists(filepath):
+        return jsonify({"error": "File not found"}), 404
+
+    # Extract mono PCM at 100 Hz — manageable even for 2-hour files
+    cmd = [
+        "ffmpeg", "-i", filepath,
+        "-ac", "1", "-filter:a", "aresample=100",
+        "-map_metadata", "-1",
+        "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"
+    ]
+    result = subprocess.run(cmd, capture_output=True)
+    if result.returncode != 0 or not result.stdout:
+        return jsonify({"error": "ffmpeg failed"}), 500
+
+    raw = result.stdout
+    n_samples = len(raw) // 2
+    samples = struct.unpack(f"<{n_samples}h", raw)
+
+    duration = n_samples / 100.0
+
+    # Downsample to n_points using RMS per chunk
+    chunk = max(1, n_samples // n_points)
+    points = []
+    max_rms = 1.0
+    rms_list = []
+    for i in range(0, n_samples, chunk):
+        seg = samples[i:i + chunk]
+        rms = (sum(s * s for s in seg) / len(seg)) ** 0.5
+        rms_list.append(rms)
+    if rms_list:
+        max_rms = max(rms_list) or 1.0
+        points = [round(r / max_rms, 4) for r in rms_list]
+
+    return jsonify({"points": points, "duration": round(duration, 2)})
+
 
 @app.route("/audio_snippet")
 def audio_snippet():

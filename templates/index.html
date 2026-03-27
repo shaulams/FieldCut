@@ -236,6 +236,12 @@
   .drawer-project:hover .drawer-project-delete { opacity: 1; }
   .drawer-project-delete:hover { color: #e06060; }
 
+  /* WAVEFORM */
+  .waveform-bar { flex-shrink: 0; background: var(--bg2); border-bottom: 1px solid var(--border); position: relative; cursor: crosshair; display: none; }
+  .waveform-bar.visible { display: block; }
+  .waveform-bar canvas { display: block; width: 100%; height: 72px; }
+  .waveform-time { position: absolute; top: 4px; right: 10px; font-family: var(--mono); font-size: 10px; color: var(--text3); pointer-events: none; font-variant-numeric: tabular-nums; }
+
   /* SEARCH BAR */
   .search-bar { display: none; padding: 0 24px 8px; }
   .search-bar.active { display: flex; gap: 6px; align-items: center; }
@@ -307,6 +313,10 @@
 <div class="phase-screen active" id="phase-1">
   <div class="main">
   <div class="center">
+    <div class="waveform-bar" id="waveform-bar" onclick="waveformClick(event)" onmousemove="waveformHover(event)" onmouseleave="waveformHoverEnd()">
+      <canvas id="waveform-canvas" height="72"></canvas>
+      <div class="waveform-time" id="waveform-time"></div>
+    </div>
       <div class="transcript-pane" id="transcript-pane">
         <div class="pane-label" data-i18n="transcript_label"></div>
         <div class="upload-zone" id="upload-zone">
@@ -594,6 +604,9 @@ function renderAll() {
   renderAssemblyPane();
   renderPhaseButtons();
   updatePhaseBar(state.phase || 1);
+  if (state.source_file && state.transcript && state.transcript.length) {
+    loadWaveform(state.source_file);
+  }
   // Restore narration upload state
   if (state.narration_filename && !(state.narration_words && state.narration_words.length)) {
     document.getElementById('narr-file-info').style.display = '';
@@ -920,6 +933,7 @@ function renderClipsList() {
       </div>
     </div>`;
   }).join('');
+  drawWaveform();
 }
 
 function renderNarrClipsList() {
@@ -958,6 +972,92 @@ function renderNarrClipsList() {
     </div>`;
   }).join('');
   container.innerHTML += '<br>';
+}
+
+// ── WAVEFORM ──
+let waveformData = null;
+let waveformDuration = 0;
+let waveformSourceFile = null;
+let waveformPlayhead = 0;
+
+async function loadWaveform(sourceFile) {
+  if (!sourceFile) return;
+  if (waveformSourceFile === sourceFile && waveformData) { drawWaveform(); return; }
+  const res = await fetch(`/waveform?file=${encodeURIComponent(sourceFile)}`);
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.error || !data.points) return;
+  waveformData = data.points;
+  waveformDuration = data.duration;
+  waveformSourceFile = sourceFile;
+  document.getElementById('waveform-bar').classList.add('visible');
+  drawWaveform();
+}
+
+function drawWaveform() {
+  const canvas = document.getElementById('waveform-canvas');
+  if (!canvas || !waveformData) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.offsetWidth;
+  const H = 72;
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+
+  const cs = getComputedStyle(document.documentElement);
+  ctx.fillStyle = cs.getPropertyValue('--bg2').trim();
+  ctx.fillRect(0, 0, W, H);
+
+  // Clip regions
+  (state.text_clips || []).forEach(c => {
+    const x1 = (c.start / waveformDuration) * W;
+    const x2 = (c.end / waveformDuration) * W;
+    ctx.fillStyle = 'rgba(29,158,117,0.18)';
+    ctx.fillRect(x1, 0, x2 - x1, H);
+    ctx.strokeStyle = 'rgba(29,158,117,0.7)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H); ctx.stroke();
+  });
+
+  // Waveform bars
+  const pts = waveformData;
+  const bw = W / pts.length;
+  const cy = H / 2;
+  ctx.fillStyle = cs.getPropertyValue('--text3').trim() || '#555';
+  pts.forEach((v, i) => {
+    const bh = Math.max(1, v * H * 0.88);
+    ctx.fillRect(i * bw, cy - bh / 2, Math.max(0.8, bw - 0.5), bh);
+  });
+
+  // Playhead
+  if (waveformPlayhead > 0 && waveformDuration > 0) {
+    const px = (waveformPlayhead / waveformDuration) * W;
+    ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(px, 0); ctx.lineTo(px, H); ctx.stroke();
+  }
+}
+
+function waveformClick(e) {
+  if (!waveformDuration || !state.source_file) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
+  waveformPlayhead = t;
+  drawWaveform();
+  playSnippet(state.source_file, t, Math.min(waveformDuration, t + 30));
+}
+
+function waveformHover(e) {
+  if (!waveformDuration) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const t = ((e.clientX - rect.left) / rect.width) * waveformDuration;
+  document.getElementById('waveform-time').textContent = formatTime(t);
+}
+
+function waveformHoverEnd() {
+  document.getElementById('waveform-time').textContent = '';
 }
 
 function toggleTrim(id, source) {
@@ -1679,6 +1779,10 @@ function clearSearchHighlights() {
 }
 
 init();
+
+// Redraw waveform on resize
+new ResizeObserver(() => { if (waveformData) drawWaveform(); })
+  .observe(document.getElementById('waveform-bar'));
 </script>
 </body>
 </html>

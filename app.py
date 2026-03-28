@@ -1,6 +1,6 @@
 import os, json, subprocess, tempfile, threading, time, io, shutil, struct
 from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, Response
+from flask import Flask, render_template, request, jsonify, send_file, Response, abort
 
 # Optional diarization — requires HUGGINGFACE_TOKEN in .env
 _diarization_pipeline = None
@@ -1084,7 +1084,6 @@ def safe_project_path(filepath):
     for allowed in [os.path.realpath("projects"), os.path.realpath("demo")]:
         if abs_path.startswith(allowed + os.sep) or abs_path == allowed:
             return abs_path
-    from flask import abort
     abort(403)
 
 # ─── AUDIO ────────────────────────────────────────────────

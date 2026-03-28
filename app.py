@@ -184,6 +184,17 @@ client = OpenAI(api_key=api_key) if api_key else None
 if not api_key:
     print("⚠️  OPENAI_API_KEY not set. Create a .env file with: OPENAI_API_KEY=sk-...")
 
+def reload_api_keys():
+    """Reload API keys from .env without restarting the server."""
+    global api_key, client
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(override=True)
+    except ImportError:
+        pass
+    api_key = os.environ.get("OPENAI_API_KEY")
+    client = OpenAI(api_key=api_key) if api_key else None
+
 # Check for ffmpeg
 try:
     subprocess.run(["ffmpeg", "-version"], capture_output=True, check=True)
@@ -1570,6 +1581,61 @@ def load_demo():
 
     threading.Thread(target=do_demo_transcribe).start()
     return jsonify({"ok": True, "filename": "demo_interview.mp3"})
+
+
+@app.route("/setup/status")
+def setup_status():
+    """Check which API keys are configured."""
+    return jsonify({
+        "openai": bool(os.environ.get("OPENAI_API_KEY")),
+        "huggingface": bool(os.environ.get("HUGGINGFACE_TOKEN")),
+    })
+
+@app.route("/setup/save_keys", methods=["POST"])
+def setup_save_keys():
+    """Validate and save API keys to .env file."""
+    data = request.json or {}
+    openai_key = data.get("openai_key", "").strip()
+    hf_token = data.get("hf_token", "").strip()
+
+    # Validate OpenAI key
+    if openai_key:
+        try:
+            test_client = OpenAI(api_key=openai_key)
+            test_client.models.list()
+        except Exception as e:
+            return jsonify({"error": f"OpenAI key invalid: {e}"}), 400
+
+    # Validate HuggingFace token (light check — just format)
+    if hf_token and not hf_token.startswith("hf_"):
+        return jsonify({"error": "HuggingFace token should start with hf_"}), 400
+
+    # Read existing .env
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env")
+    existing = {}
+    if os.path.exists(env_path):
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    existing[k.strip()] = v.strip()
+
+    # Update keys
+    if openai_key:
+        existing["OPENAI_API_KEY"] = openai_key
+    if hf_token:
+        existing["HUGGINGFACE_TOKEN"] = hf_token
+
+    # Write .env
+    with open(env_path, "w") as f:
+        for k, v in existing.items():
+            f.write(f"{k}={v}\n")
+
+    # Reload into current process
+    reload_api_keys()
+
+    return jsonify({"ok": True})
 
 
 @app.route("/reset", methods=["POST"])

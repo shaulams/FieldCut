@@ -15,11 +15,17 @@ def get_diarization_pipeline():
         if _diarization_pipeline is None:
             try:
                 from pyannote.audio import Pipeline
+                import torch
                 _diarization_pipeline = Pipeline.from_pretrained(
-                    "pyannote/speaker-diarization-3.1",
-                    use_auth_token=token,
+                    "pyannote/speaker-diarization-community-1",
+                    token=token,
                 )
-                print("✓ Speaker diarization pipeline loaded")
+                # Use Apple Silicon GPU if available, otherwise CPU
+                if torch.backends.mps.is_available():
+                    _diarization_pipeline.to(torch.device("mps"))
+                    print("✓ Speaker diarization pipeline loaded (MPS/GPU)")
+                else:
+                    print("✓ Speaker diarization pipeline loaded (CPU)")
             except Exception as e:
                 print(f"⚠️  Diarization pipeline failed to load: {e}")
                 return None
@@ -31,27 +37,67 @@ def assign_speakers(segments, audio_path):
     if pipeline is None:
         return segments  # no-op: keep S1 for all
     try:
-        diarization = pipeline(audio_path)
+        # pyannote works best with WAV — convert if needed
+        wav_path = audio_path
+        tmp_wav = None
+        if not audio_path.lower().endswith(".wav"):
+            tmp_wav = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+            tmp_wav.close()
+            subprocess.run(
+                ["ffmpeg", "-y", "-i", audio_path, "-ar", "16000", "-ac", "1", tmp_wav.name],
+                capture_output=True,
+            )
+            wav_path = tmp_wav.name
+
+        result = pipeline(wav_path)
+        # pyannote 3.x returns DiarizeOutput; extract the Annotation object
+        diarization = getattr(result, 'speaker_diarization', result)
         # Build list of (start, end, speaker) turns
         turns = [(turn.start, turn.end, speaker)
                  for turn, _, speaker in diarization.itertracks(yield_label=True)]
         # Map each segment to the speaker with the most overlap
         speaker_map = {}  # pyannote label → S1/S2/...
         for seg in segments:
-            best_speaker, best_overlap = "S1", 0.0
+            best_speaker, best_overlap = None, 0.0
             for t_start, t_end, spk in turns:
                 overlap = min(seg["end"], t_end) - max(seg["start"], t_start)
                 if overlap > best_overlap:
                     best_overlap = overlap
                     best_speaker = spk
+            if best_speaker is None:
+                best_speaker = turns[0][2] if turns else "SPEAKER_00"
             # Normalise to S1/S2/... labels
             if best_speaker not in speaker_map:
                 speaker_map[best_speaker] = f"S{len(speaker_map) + 1}"
             seg["speaker"] = speaker_map[best_speaker]
+
+        if tmp_wav:
+            os.unlink(tmp_wav.name)
         return segments
     except Exception as e:
         print(f"⚠️  Diarization failed: {e}")
+        if tmp_wav:
+            try: os.unlink(tmp_wav.name)
+            except: pass
         return segments
+
+# Speaker color mapping (matches frontend SPK_COLORS)
+SPK_COLORS_RGB = {
+    "S1": (0x1D, 0x9E, 0x75),
+    "S2": (0x37, 0x8A, 0xDD),
+    "S3": (0xC8, 0x8C, 0x32),
+    "S4": (0xA0, 0x50, 0xB4),
+}
+
+def get_clip_speaker(clip, transcript):
+    """Find which speaker has the most overlap with this clip's time range."""
+    best, best_overlap = "S1", 0.0
+    for seg in transcript:
+        overlap = min(clip["end"], seg["end"]) - max(clip["start"], seg["start"])
+        if overlap > best_overlap:
+            best_overlap = overlap
+            best = seg.get("speaker", "S1")
+    return best
 
 # Load .env file if present (so OPENAI_API_KEY persists across sessions)
 try:
@@ -63,6 +109,33 @@ except ImportError:
 from openai import OpenAI
 
 app = Flask(__name__)
+
+# ─── APP CONFIG ──────────────────────────────────────────
+_config_path = "config.json"
+
+def load_config():
+    if os.path.exists(_config_path):
+        with open(_config_path) as f:
+            return json.load(f)
+    return {}
+
+def save_config(cfg):
+    with open(_config_path, "w") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+def copy_to_export_folder(filepath):
+    """Copy a file to the configured export folder, if set."""
+    cfg = load_config()
+    export_dir = cfg.get("export_folder", "").strip()
+    if not export_dir:
+        return
+    export_dir = os.path.expanduser(export_dir)
+    if not os.path.isdir(export_dir):
+        return
+    try:
+        shutil.copy2(filepath, os.path.join(export_dir, os.path.basename(filepath)))
+    except Exception as e:
+        print(f"⚠️  Failed to copy to export folder: {e}")
 
 # ─── PROJECT DIRECTORY ────────────────────────────────────
 _active_project_dir = os.path.join("projects", "_session")
@@ -120,7 +193,7 @@ except (subprocess.CalledProcessError, FileNotFoundError):
 
 # In-memory state (persisted per-project)
 # Progress tracking for async operations
-progress = {"phase": None, "current": 0, "total": 0, "message": ""}
+progress = {"phase": None, "current": 0, "total": 0, "message": "", "audio_duration": 0}
 
 def state_file():
     return os.path.join(_active_project_dir, "state.json")
@@ -203,6 +276,7 @@ def transcribe():
     filepath = os.path.join(pdir("uploads"), filename)
     f.save(filepath)
     whisper_lang = request.form.get("language", "he")
+    diarize = request.form.get("diarize") == "1"
     if whisper_lang == "auto":
         whisper_lang = None
 
@@ -213,6 +287,15 @@ def transcribe():
         save_state(state)
 
         try:
+            # Get audio duration for time estimates
+            try:
+                dur_result = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filepath],
+                    capture_output=True, text=True)
+                progress["audio_duration"] = float(dur_result.stdout.strip())
+            except Exception:
+                progress["audio_duration"] = 0
+
             upload_path = filepath
             if os.path.getsize(filepath) > 25 * 1024 * 1024:
                 progress.update(phase="transcribe", current=0, total=3, message="compressing audio…")
@@ -261,8 +344,8 @@ def transcribe():
 
             progress.update(current=progress["total"] - 1, message="processing segments…")
 
-            # Diarization (optional — only if HUGGINGFACE_TOKEN is set)
-            if os.environ.get("HUGGINGFACE_TOKEN"):
+            # Diarization (optional — only if user opted in and HUGGINGFACE_TOKEN is set)
+            if diarize and os.environ.get("HUGGINGFACE_TOKEN"):
                 progress.update(message="detecting speakers…")
                 segments = assign_speakers(segments, filepath)
 
@@ -490,20 +573,31 @@ def cut_clips():
             title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
             set_rtl_doc(title)
 
+            transcript = st.get("transcript", [])
+            speaker_names = st.get("speaker_names", {})
+            multi_spk = len(set(s.get("speaker", "S1") for s in transcript)) > 1
             for clip in st.get("text_clips", []):
                 start_fmt = f"{int(clip['start']//60):02d}:{int(clip['start']%60):02d}"
                 end_fmt = f"{int(clip['end']//60):02d}:{int(clip['end']%60):02d}"
+                spk = get_clip_speaker(clip, transcript) if multi_spk else None
                 p = doc.add_paragraph()
-                run = p.add_run(f"{clip['id']}  ({start_fmt} – {end_fmt})")
+                header = f"{clip['id']}  ({start_fmt} – {end_fmt})"
+                if spk:
+                    header += f"  [{speaker_names.get(spk, spk)}]"
+                run = p.add_run(header)
                 run.bold = True
                 run.font.size = Pt(14)
-                run.font.color.rgb = RGBColor(0x33, 0x99, 0x66)
+                r, g, b = SPK_COLORS_RGB.get(spk, (0x33, 0x99, 0x66)) if spk else (0x33, 0x99, 0x66)
+                run.font.color.rgb = RGBColor(r, g, b)
                 set_rtl_doc(p)
                 tp = doc.add_paragraph(clip.get("text", ""))
                 set_rtl_doc(tp)
                 doc.add_paragraph("")
 
-            doc.save(os.path.join(pdir("output"), "transcript.docx"))
+            base = os.path.splitext(st.get("filename", "transcript"))[0]
+            docx_path = os.path.join(pdir("output"), f"{base}.docx")
+            doc.save(docx_path)
+            copy_to_export_folder(docx_path)
         except Exception:
             pass  # Word doc generation is best-effort
 
@@ -548,15 +642,24 @@ def export_transcript():
     title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     set_rtl(title)
 
+    transcript = state.get("transcript", [])
+    speaker_names = state.get("speaker_names", {})
+    multi_spk = len(set(s.get("speaker", "S1") for s in transcript)) > 1
+
     for clip in text_clips:
         start_fmt = f"{int(clip['start']//60):02d}:{int(clip['start']%60):02d}"
         end_fmt = f"{int(clip['end']//60):02d}:{int(clip['end']%60):02d}"
+        spk = get_clip_speaker(clip, transcript) if multi_spk else None
 
         p = doc.add_paragraph()
-        run = p.add_run(f"{clip['id']}  ({start_fmt} – {end_fmt})")
+        header = f"{clip['id']}  ({start_fmt} – {end_fmt})"
+        if spk:
+            header += f"  [{speaker_names.get(spk, spk)}]"
+        run = p.add_run(header)
         run.bold = True
         run.font.size = Pt(14)
-        run.font.color.rgb = RGBColor(0x33, 0x99, 0x66)
+        r, g, b = SPK_COLORS_RGB.get(spk, (0x33, 0x99, 0x66)) if spk else (0x33, 0x99, 0x66)
+        run.font.color.rgb = RGBColor(r, g, b)
         set_rtl(p)
 
         tp = doc.add_paragraph(clip.get("text", ""))
@@ -564,9 +667,12 @@ def export_transcript():
 
         doc.add_paragraph("")  # spacer
 
-    out_path = os.path.join(pdir("output"), "transcript.docx")
+    base = os.path.splitext(state.get("filename", "transcript"))[0]
+    docx_name = f"{base}.docx"
+    out_path = os.path.join(pdir("output"), docx_name)
     doc.save(out_path)
-    return send_file(out_path, as_attachment=True, download_name="transcript.docx")
+    copy_to_export_folder(out_path)
+    return send_file(out_path, as_attachment=True, download_name=docx_name)
 
 # ─── STEP 4: NARRATION ────────────────────────────────────
 
@@ -815,6 +921,7 @@ def assemble():
                 st["output_file"] = output_path
                 st["output_filename"] = output_name
                 save_state(st)
+                copy_to_export_folder(output_path)
                 progress.update(phase=None, current=len(file_paths), total=len(file_paths), message="done")
         except Exception as e:
             st = load_state()
@@ -903,6 +1010,10 @@ def export_paper_edit():
     pBdr.append(bottom)
     title._p.get_or_add_pPr().append(pBdr)
 
+    transcript = state.get("transcript", [])
+    speaker_names = state.get("speaker_names", {})
+    multi_spk = len(set(s.get("speaker", "S1") for s in transcript)) > 1
+
     for i, item in enumerate(assembly_order, 1):
         item_type = item.get("type")
         if item_type == "clip":
@@ -911,12 +1022,17 @@ def export_paper_edit():
             start = clip.get("start", 0)
             end = clip.get("end", 0)
             text = clip_text.get(cid, "").strip()
+            spk = get_clip_speaker(clip, transcript) if multi_spk else None
 
             # Type label
             label_para = doc.add_paragraph()
-            label_run = label_para.add_run(f"[{i}] CLIP — {cid}  {start:.1f}s – {end:.1f}s")
+            header = f"[{i}] CLIP — {cid}  {start:.1f}s – {end:.1f}s"
+            if spk:
+                header += f"  [{speaker_names.get(spk, spk)}]"
+            label_run = label_para.add_run(header)
             label_run.bold = True
-            label_run.font.color.rgb = RGBColor(0x1D, 0x9E, 0x75)
+            r, g, b = SPK_COLORS_RGB.get(spk, (0x1D, 0x9E, 0x75)) if spk else (0x1D, 0x9E, 0x75)
+            label_run.font.color.rgb = RGBColor(r, g, b)
 
             # Text
             if text:
@@ -945,6 +1061,7 @@ def export_paper_edit():
     docx_name = rough_cut_name.replace(".wav", ".docx") if rough_cut_name.endswith(".wav") else "transcript.docx"
     out_path = os.path.join(pdir("output"), docx_name)
     doc.save(out_path)
+    copy_to_export_folder(out_path)
     return send_file(out_path, as_attachment=True, download_name=docx_name)
 
 
@@ -1052,8 +1169,8 @@ def export_clips_zip():
             if path and os.path.exists(path):
                 zf.write(path, os.path.basename(path))
     buf.seek(0)
-    project_name = state.get("project_name", "clips")
-    zip_name = f"{project_name}_clips.zip"
+    base = os.path.splitext(state.get("filename", "clips"))[0]
+    zip_name = f"{base}_clips.zip"
     return Response(buf.read(), mimetype="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{zip_name}"'})
 
@@ -1212,6 +1329,63 @@ def delete_project():
     return jsonify({"ok": True})
 
 
+@app.route("/export_folder", methods=["GET"])
+def get_export_folder():
+    cfg = load_config()
+    return jsonify({"export_folder": cfg.get("export_folder", "")})
+
+@app.route("/export_folder/browse", methods=["POST"])
+def browse_export_folder():
+    """Open native folder picker (macOS, Windows, or Linux) and return the selected path."""
+    import sys
+    try:
+        if sys.platform == "darwin":
+            result = subprocess.run(
+                ["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose export folder")'],
+                capture_output=True, text=True, timeout=120,
+            )
+            folder = result.stdout.strip().rstrip("/")
+            if result.returncode != 0 or not folder:
+                return jsonify({"cancelled": True})
+            return jsonify({"folder": folder})
+        elif sys.platform == "win32":
+            result = subprocess.run(
+                ["powershell", "-Command",
+                 "Add-Type -AssemblyName System.Windows.Forms; "
+                 "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                 "if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath } else { '' }"],
+                capture_output=True, text=True, timeout=120,
+            )
+            folder = result.stdout.strip()
+            if not folder:
+                return jsonify({"cancelled": True})
+            return jsonify({"folder": folder})
+        else:
+            # Linux — try zenity
+            result = subprocess.run(
+                ["zenity", "--file-selection", "--directory", "--title=Choose export folder"],
+                capture_output=True, text=True, timeout=120,
+            )
+            folder = result.stdout.strip()
+            if result.returncode != 0 or not folder:
+                return jsonify({"cancelled": True})
+            return jsonify({"folder": folder})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/export_folder", methods=["POST"])
+def set_export_folder():
+    data = request.json or {}
+    folder = data.get("folder", "").strip()
+    if folder:
+        expanded = os.path.expanduser(folder)
+        if not os.path.isdir(expanded):
+            return jsonify({"error": "Folder does not exist"}), 400
+    cfg = load_config()
+    cfg["export_folder"] = folder
+    save_config(cfg)
+    return jsonify({"ok": True, "export_folder": folder})
+
 @app.route("/update_metadata", methods=["POST"])
 def update_metadata():
     data = request.json or {}
@@ -1236,6 +1410,27 @@ def rename_speaker():
     state["speaker_names"][speaker_id] = display_name
     save_state(state)
     return jsonify({"ok": True, "speaker_names": state["speaker_names"]})
+
+
+@app.route("/reassign_speaker", methods=["POST"])
+def reassign_speaker():
+    data = request.json or {}
+    seg_id = data.get("segment_id")
+    new_speaker = data.get("speaker", "").strip()
+    if seg_id is None or not new_speaker:
+        return jsonify({"error": "segment_id and speaker required"}), 400
+    state = load_state()
+    for seg in state.get("transcript", []):
+        if seg["id"] == seg_id:
+            seg["speaker"] = new_speaker
+            break
+    # Ensure speaker_names includes the new speaker
+    if "speaker_names" not in state:
+        state["speaker_names"] = {}
+    if new_speaker not in state["speaker_names"]:
+        state["speaker_names"][new_speaker] = new_speaker
+    save_state(state)
+    return jsonify({"ok": True, "transcript": state["transcript"], "speaker_names": state["speaker_names"]})
 
 
 @app.route("/duplicate_project", methods=["POST"])

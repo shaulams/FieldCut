@@ -41,7 +41,7 @@
   @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; } }
 
   /* TOP BAR */
-  .topbar { height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg2); flex-shrink: 0; }
+  .topbar { height: 48px; display: flex; align-items: center; gap: 16px; padding: 0 20px; border-bottom: 1px solid var(--border); background: var(--bg); flex-shrink: 0; }
   .logo { font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: 0.15em; color: var(--green); }
   .file-info { font-family: var(--mono); font-size: 13px; color: var(--text2); }
   .topbar-btn { font-family: var(--sans); font-size: 13px; padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: border-color 0.15s, color 0.15s; }
@@ -55,11 +55,20 @@
   .lang-btn:hover { border-color: var(--green); color: var(--green); }
   .lang-btn:active { transform: scale(0.96); }
   .lang-btn:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
-  .status-pill { font-family: var(--sans); font-size: 13px; padding: 4px 12px; border-radius: 20px; margin-left: auto; font-variant-numeric: tabular-nums; }
+  .status-pill { font-family: var(--sans); font-size: 13px; padding: 5px 14px; border-radius: 20px; font-variant-numeric: tabular-nums; font-weight: 500; }
   .status-idle { background: var(--bg3); color: var(--text3); border: 1px solid var(--border); }
-  .status-working { background: rgba(55,138,221,0.15); color: var(--blue); border: 1px solid rgba(55,138,221,0.3); }
-  .status-done { background: rgba(29,158,117,0.15); color: var(--green); border: 1px solid rgba(29,158,117,0.3); }
-  .status-error { background: rgba(200,50,50,0.15); color: #e06060; border: 1px solid rgba(200,50,50,0.3); }
+  .status-working { background: rgba(55,138,221,0.2); color: var(--blue); border: 1px solid rgba(55,138,221,0.4); animation: pulse-status 1.5s ease-in-out infinite; }
+  .status-done { background: rgba(29,158,117,0.2); color: var(--green); border: 1px solid rgba(29,158,117,0.4); }
+  .status-error { background: rgba(200,50,50,0.2); color: #e06060; border: 1px solid rgba(200,50,50,0.4); }
+  @keyframes pulse-status { 0%,100% { opacity: 1; } 50% { opacity: 0.7; } }
+  /* Project dropdown */
+  .project-menu-wrap { position: relative; }
+  .project-menu-btn { font-family: var(--sans); font-size: 13px; padding: 5px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: var(--text2); cursor: pointer; transition: border-color 0.15s, color 0.15s; display: flex; align-items: center; gap: 4px; }
+  .project-menu-btn:hover { border-color: var(--green); color: var(--green); }
+  .project-menu { display: none; position: absolute; top: 100%; inset-inline-end: 0; margin-top: 4px; background: var(--bg2); border: 1px solid var(--border); border-radius: 8px; min-width: 160px; z-index: 200; box-shadow: 0 4px 16px rgba(0,0,0,0.3); overflow: hidden; }
+  .project-menu.open { display: block; }
+  .project-menu-item { font-family: var(--sans); font-size: 13px; padding: 8px 14px; color: var(--text2); cursor: pointer; transition: background 0.1s; border: none; background: none; width: 100%; text-align: start; display: block; }
+  .project-menu-item:hover { background: var(--bg3); color: var(--text); }
 
   /* Error banner */
   #error-banner { display: none; background: rgba(200,50,50,0.12); border-bottom: 1px solid rgba(200,50,50,0.35); color: #e06060; font-size: 13px; font-family: var(--sans); padding: 9px 16px; gap: 10px; align-items: center; }
@@ -213,6 +222,11 @@
   /* PROGRESS BAR */
   .progress-bar { display: none; margin-top: 6px; }
   .progress-bar.active { display: block; }
+  .progress-steps { display: flex; gap: 6px; margin-bottom: 6px; font-family: var(--sans); font-size: 12px; align-items: center; }
+  .progress-step { color: var(--text3); transition: color 0.3s; }
+  .progress-step.active { color: var(--green); font-weight: 600; }
+  .progress-step.done { color: var(--text2); text-decoration: line-through; text-decoration-color: var(--text3); }
+  .progress-step-sep { color: var(--border); font-size: 10px; margin: 0 2px; }
   .progress-track { height: 5px; background: var(--bg3); border-radius: 3px; overflow: hidden; }
   .progress-fill { height: 100%; background: var(--green); border-radius: 3px; transition: width 0.3s ease; }
   .progress-fill.indeterminate { width: 30% !important; animation: indeterminate 1.5s ease-in-out infinite; }
@@ -301,10 +315,18 @@
   <span class="logo" style="cursor:pointer" onclick="toggleProjectsDrawer()">FIELD CUT</span>
   <span class="topbar-sep"></span>
   <span class="project-name" id="project-name" onclick="renameProject()" title="">untitled</span>
-  <span class="file-info" id="file-info"></span>
-  <button class="topbar-btn" onclick="toggleProjectsDrawer()" data-i18n="projects"></button>
-  <button class="topbar-btn" onclick="newProject()" data-i18n="new_project"></button>
   <span class="status-pill status-idle" id="status-pill" data-i18n="idle"></span>
+  <span class="file-info" id="file-info"></span>
+  <div class="project-menu-wrap" id="project-menu-wrap" style="margin-inline-start:auto">
+    <button class="project-menu-btn" onclick="toggleProjectMenu()" data-i18n="projects">&#9662;</button>
+    <div class="project-menu" id="project-menu">
+      <button class="project-menu-item" onclick="saveProject();closeProjectMenu()" data-i18n="save_project"></button>
+      <button class="project-menu-item" onclick="toggleProjectsDrawer();closeProjectMenu()" data-i18n="projects"></button>
+      <button class="project-menu-item" onclick="newProject();closeProjectMenu()" data-i18n="new_project"></button>
+      <div style="border-top:1px solid var(--border);margin:2px 0"></div>
+      <button class="project-menu-item" onclick="setExportFolder();closeProjectMenu()" data-i18n="export_folder"></button>
+    </div>
+  </div>
   <span class="autosave-dot" id="autosave-dot" title="Auto-saved"></span>
   <button class="lang-btn" id="lang-toggle" onclick="cycleLang()" aria-label="Switch language">EN</button>
   <button class="topbar-btn" id="theme-toggle" onclick="toggleTheme()" aria-label="Toggle light/dark mode" title="Toggle light/dark mode" style="padding:4px 8px;font-size:13px;border:none">&#9790;</button>
@@ -384,6 +406,11 @@
               <option value="auto">Auto-detect</option>
             </select>
           </div>
+          <label style="display:flex;align-items:center;gap:6px;margin-top:10px;font-family:var(--sans);font-size:12px;color:var(--text2);cursor:pointer;justify-content:center">
+            <input type="checkbox" id="diarize-toggle">
+            <span data-i18n="diarize_label"></span>
+          </label>
+          <small id="diarize-hint" style="display:none;font-family:var(--sans);font-size:11px;color:var(--text2);margin-top:2px" data-i18n="diarize_hint"></small>
           <button class="btn btn-primary" onclick="document.getElementById('audio-input').click()" style="width:auto;margin-top:10px;padding:8px 20px" data-i18n="choose_file"></button>
         </div>
         <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
@@ -400,6 +427,7 @@
     </div>
     <div class="right">
       <div class="progress-bar" id="progress-bar">
+        <div class="progress-steps" id="progress-steps"></div>
         <div class="progress-track"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
         <div class="progress-label"><span id="progress-msg">—</span><span class="elapsed" id="progress-elapsed"></span></div>
       </div>
@@ -684,9 +712,11 @@ async function uploadAndTranscribe(event) {
   document.getElementById('file-info').textContent = file.name;
   setStatus('working', t('transcribing'));
   const whisperLang = document.getElementById('whisper-lang').value;
+  const diarize = document.getElementById('diarize-toggle').checked;
   const formData = new FormData();
   formData.append('file', file);
   formData.append('language', whisperLang);
+  if (diarize) formData.append('diarize', '1');
   const res = await fetch('/transcribe', { method: 'POST', body: formData });
   if (!res.ok) {
     const data = await res.json().catch(() => ({ error: t('server_error') }));
@@ -762,8 +792,9 @@ function renderTranscript() {
       const badge = document.createElement('span');
       badge.className = 'spk-badge spk-' + spk;
       badge.textContent = names[spk] || spk;
-      badge.title = 'Click to rename speaker';
+      badge.title = t('badge_tooltip');
       badge.onclick = (e) => { e.stopPropagation(); renameSpeaker(spk); };
+      badge.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); reassignSegmentSpeaker(seg.id, spk); };
       para.appendChild(badge);
     }
 
@@ -806,8 +837,30 @@ function renderTranscript() {
   buildWordSpanIndex();
 }
 
-// ── SPEAKER LEGEND + RENAME ──
+// ── SPEAKER COLORS + HELPERS ──
 const SPK_COLORS = { S1: '#1d9e75', S2: '#378add', S3: '#c88c32', S4: '#a050b4' };
+
+function getClipSpeaker(clip) {
+  // Find which speaker has the most overlap with this clip's time range
+  const segs = state.transcript || [];
+  let best = 'S1', bestOverlap = 0;
+  for (const seg of segs) {
+    const overlap = Math.min(clip.end, seg.end) - Math.max(clip.start, seg.start);
+    if (overlap > bestOverlap) {
+      bestOverlap = overlap;
+      best = seg.speaker || 'S1';
+    }
+  }
+  return best;
+}
+
+function spkColorRgba(spk, alpha) {
+  const hex = SPK_COLORS[spk] || '#888';
+  const r = parseInt(hex.slice(1,3), 16), g = parseInt(hex.slice(3,5), 16), b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── SPEAKER LEGEND + RENAME ──
 
 function renderSpeakerLegend() {
   const legend = document.getElementById('speaker-legend');
@@ -823,7 +876,7 @@ function renderSpeakerLegend() {
       <div class="spk-legend-dot" style="background:${color}"></div>
       <span class="spk-legend-name" onclick="renameSpeaker('${spk}')" title="Click to rename">${name}</span>
     </div>`;
-  }).join('');
+  }).join('') + `<div style="width:100%;font-family:var(--sans);font-size:13px;color:var(--text2);margin-top:4px">${t('diarize_notice')}</div>`;
 }
 
 function renameSpeaker(spkId) {
@@ -837,6 +890,24 @@ function renameSpeaker(spkId) {
     body: JSON.stringify({ speaker_id: spkId, display_name: newName.trim() })
   }).then(r => r.json()).then(data => {
     if (data.ok) {
+      state.speaker_names = data.speaker_names;
+      renderTranscript();
+    }
+  });
+}
+
+function reassignSegmentSpeaker(segId, currentSpk) {
+  const speakers = Object.keys(state.speaker_names || {});
+  if (speakers.length < 2) return;
+  const idx = speakers.indexOf(currentSpk);
+  const nextSpk = speakers[(idx + 1) % speakers.length];
+  fetch('/reassign_speaker', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ segment_id: segId, speaker: nextSpk })
+  }).then(r => r.json()).then(data => {
+    if (data.ok) {
+      state.transcript = data.transcript;
       state.speaker_names = data.speaker_names;
       renderTranscript();
     }
@@ -1032,11 +1103,14 @@ function renderClipsList() {
   }
 
   const src = state.source_file || '';
+  const multiSpeaker = new Set((state.transcript || []).map(s => s.speaker || 'S1')).size > 1;
   container.innerHTML = clips.map(c => {
     const dur = formatDur(c.end - c.start);
     const isCut = cutIds.has(c.id);
     const preview = c.text.length > 25 ? c.text.slice(0, 25) + '\u2026' : c.text;
-    return `<div class="clip-item" id="clip-item-${c.id}" data-start="${c.start}" data-end="${c.end}" data-source="${src}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()" style="flex-wrap:wrap">
+    const spk = multiSpeaker ? getClipSpeaker(c) : null;
+    const borderStyle = spk ? `border-inline-start: 3px solid ${SPK_COLORS[spk] || '#888'}` : '';
+    return `<div class="clip-item" id="clip-item-${c.id}" data-start="${c.start}" data-end="${c.end}" data-source="${src}" onmouseenter="startClipPreview(this)" onmouseleave="stopClipPreview()" style="flex-wrap:wrap;${borderStyle}">
       <span class="clip-num">${c.id.replace('clip_','')}</span>
       <span class="clip-text-preview" title="${c.text}">${preview}</span>
       <span class="clip-dur">${dur}</span>
@@ -1214,14 +1288,16 @@ function drawWaveform() {
   const { start: visStart, end: visEnd, dur: visDur } = waveformVisWindow();
 
   // Clip regions + number badges
+  const wfMultiSpk = new Set((state.transcript || []).map(s => s.speaker || 'S1')).size > 1;
   (state.text_clips || []).forEach(c => {
     if (c.end < visStart || c.start > visEnd) return;
+    const spk = wfMultiSpk ? getClipSpeaker(c) : 'S1';
     const x1 = tToX(c.start, W);
     const x2 = tToX(c.end, W);
     const rw = x2 - x1;
-    ctx.fillStyle = 'rgba(29,158,117,0.18)';
+    ctx.fillStyle = spkColorRgba(spk, 0.18);
     ctx.fillRect(x1, 0, rw, H - SB);
-    ctx.strokeStyle = 'rgba(29,158,117,0.7)';
+    ctx.strokeStyle = spkColorRgba(spk, 0.7);
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(x1, 0); ctx.lineTo(x1, H - SB); ctx.stroke();
     ctx.beginPath(); ctx.moveTo(x2, 0); ctx.lineTo(x2, H - SB); ctx.stroke();
@@ -1238,7 +1314,7 @@ function drawWaveform() {
     const cy = (H - SB) / 2;
     const tw = ctx.measureText(label).width;
     const bw2 = tw + 12, bh2 = 20;
-    ctx.fillStyle = 'rgba(22,120,90,0.92)';
+    ctx.fillStyle = spkColorRgba(spk, 0.92);
     ctx.beginPath(); ctx.roundRect(cx - bw2 / 2, cy - bh2 / 2, bw2, bh2, 5); ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.fillText(label, cx, cy);
@@ -1330,6 +1406,9 @@ function waveformHoverEnd() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('diarize-toggle').addEventListener('change', e => {
+    document.getElementById('diarize-hint').style.display = e.target.checked ? '' : 'none';
+  });
   document.getElementById('waveform-bar').addEventListener('wheel', e => {
     e.preventDefault();
     if (!waveformData) return;
@@ -1537,9 +1616,14 @@ function renderAssemblyPane() {
   const narrSrc = document.getElementById('asm-narr-source');
   if (!clipsSrc || !narrSrc) return;
 
-  clipsSrc.innerHTML = clips.map(c =>
-    `<div class="asm-chip chip-clip" draggable="true" data-type="clip" data-id="${c.id}">${c.id}</div>`
-  ).join('') || '<span style="font-size:10px;color:var(--text3)">' + t('asm_no_clips') + '</span>';
+  const asmMultiSpk = new Set((state.transcript || []).map(s => s.speaker || 'S1')).size > 1;
+  const textClips = state.text_clips || [];
+  clipsSrc.innerHTML = clips.map(c => {
+    const tc = textClips.find(tc => tc.id === c.id);
+    const spk = (asmMultiSpk && tc) ? getClipSpeaker(tc) : null;
+    const style = spk ? `background:${spkColorRgba(spk,0.15)};color:${SPK_COLORS[spk]};border-color:${spkColorRgba(spk,0.3)}` : '';
+    return `<div class="asm-chip chip-clip" draggable="true" data-type="clip" data-id="${c.id}" data-spk="${spk||''}" style="${style}">${c.id}</div>`;
+  }).join('') || '<span style="font-size:10px;color:var(--text3)">' + t('asm_no_clips') + '</span>';
 
   narrSrc.innerHTML = narr.map(n =>
     `<div class="asm-chip chip-narr" draggable="true" data-type="narration" data-file="${n.name}">${n.name.replace('.wav','')}</div>`
@@ -1555,10 +1639,19 @@ function renderAssemblyPane() {
 
 function renderTimeline() {
   const tl = document.getElementById('asm-timeline');
+  const tlMultiSpk = new Set((state.transcript || []).map(s => s.speaker || 'S1')).size > 1;
+  const tlTextClips = state.text_clips || [];
   tl.innerHTML = assemblyOrder.map((item, i) => {
     const label = item.type === 'narration' ? (item.file || '').replace('.wav','') : item.id;
-    const cls = item.type === 'narration' ? 'tl-narr' : 'tl-clip';
-    return `<div class="asm-tl-item ${cls}" draggable="true" data-index="${i}">
+    if (item.type === 'narration') {
+      return `<div class="asm-tl-item tl-narr" draggable="true" data-index="${i}">
+        ${label} <span class="asm-x" onclick="event.stopPropagation();removeFromAssembly(${i})">\u00d7</span>
+      </div>`;
+    }
+    const tc = tlTextClips.find(tc => tc.id === item.id);
+    const spk = (tlMultiSpk && tc) ? getClipSpeaker(tc) : null;
+    const style = spk ? `background:${spkColorRgba(spk,0.2)};color:${SPK_COLORS[spk]}` : '';
+    return `<div class="asm-tl-item tl-clip" draggable="true" data-index="${i}" style="${style}">
       ${label} <span class="asm-x" onclick="event.stopPropagation();removeFromAssembly(${i})">\u00d7</span>
     </div>`;
   }).join('');
@@ -1675,6 +1768,48 @@ async function exportPaperEdit() {
 }
 
 // ── PROGRESS BAR ──
+const TRANSCRIBE_STEPS = {
+  'compressing audio…':  0,
+  'sending to Whisper…': 1,
+  'processing segments…': 2,
+  'detecting speakers…': 3,
+};
+
+function getTranscribeStepLabels() {
+  return [
+    t('step_compress'),
+    t('step_whisper'),
+    t('step_process'),
+    t('step_speakers'),
+  ];
+}
+
+function renderProgressSteps(stepIndex, totalSteps, audioDur) {
+  const container = document.getElementById('progress-steps');
+  if (!container) return;
+  const labels = getTranscribeStepLabels().slice(0, totalSteps);
+  // Time estimates based on audio duration
+  const estimates = {};
+  if (audioDur > 0) {
+    const fmtEst = (sec) => { const m = Math.floor(sec/60), s = sec%60; return m > 0 ? `~${m}m ${s}s` : `~${sec}s`; };
+    estimates[1] = fmtEst(Math.max(5, Math.round(audioDur / 15)));
+    estimates[2] = '~5s';
+    const spkSec = Math.max(10, Math.round(audioDur / 8));
+    estimates[3] = fmtEst(spkSec);
+  }
+  container.innerHTML = labels.map((label, i) => {
+    const cls = i < stepIndex ? 'done' : i === stepIndex ? 'active' : '';
+    const est = (i >= stepIndex && estimates[i]) ? ` (${estimates[i]})` : '';
+    const sep = i < labels.length - 1 ? '<span class="progress-step-sep">›</span>' : '';
+    return `<span class="progress-step ${cls}">${label}${est}</span>${sep}`;
+  }).join('');
+}
+
+function clearProgressSteps() {
+  const container = document.getElementById('progress-steps');
+  if (container) container.innerHTML = '';
+}
+
 function startProgressPolling() {
   operationStartTime = Date.now();
   const bar = document.getElementById('progress-bar');
@@ -1682,6 +1817,7 @@ function startProgressPolling() {
   bar.classList.add('active');
   fill.className = 'progress-fill indeterminate';
   fill.style.width = '0%';
+  clearProgressSteps();
   if (progressInterval) clearInterval(progressInterval);
   progressInterval = setInterval(async () => {
     try {
@@ -1692,6 +1828,16 @@ function startProgressPolling() {
       const elapsed = Math.floor((Date.now() - operationStartTime) / 1000);
       const min = Math.floor(elapsed / 60), sec = elapsed % 60;
       elapsedEl.textContent = min > 0 ? `${min}m ${sec}s` : `${sec}s`;
+
+      // Show step indicators for transcription phase
+      if (p.phase === 'transcribe' && p.message) {
+        const stepIdx = TRANSCRIBE_STEPS[p.message];
+        if (stepIdx !== undefined) {
+          const hasSpeakers = document.getElementById('diarize-toggle')?.checked;
+          renderProgressSteps(stepIdx, hasSpeakers ? 4 : 3, p.audio_duration || 0);
+        }
+      }
+
       if (p.phase && p.total > 0) {
         fill.className = 'progress-fill';
         fill.style.width = Math.round((p.current / p.total) * 100) + '%';
@@ -1709,7 +1855,7 @@ function stopProgressPolling() {
   const bar = document.getElementById('progress-bar');
   const fill = document.getElementById('progress-fill');
   fill.className = 'progress-fill'; fill.style.width = '100%';
-  setTimeout(() => { bar.classList.remove('active'); fill.style.width = '0%'; }, 1500);
+  setTimeout(() => { bar.classList.remove('active'); fill.style.width = '0%'; clearProgressSteps(); }, 1500);
   operationStartTime = null;
 }
 
@@ -1809,6 +1955,61 @@ async function newProject() {
 }
 
 // --- Projects drawer ---
+
+async function setExportFolder() {
+  // Check current setting
+  const res = await fetch('/export_folder');
+  const data = await res.json();
+  const current = data.export_folder || '';
+
+  // If already set, ask whether to change or clear
+  if (current) {
+    const action = confirm(t('export_folder_current') + '\n' + current + '\n\n' + t('export_folder_change'));
+    if (!action) {
+      // Clear it
+      await fetch('/export_folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ folder: '' })
+      });
+      setStatus('done', t('export_folder_cleared'));
+      return;
+    }
+  }
+
+  // Open native folder picker
+  setStatus('working', t('export_folder_picking'));
+  const browseRes = await fetch('/export_folder/browse', { method: 'POST' });
+  const browseData = await browseRes.json();
+  if (browseData.cancelled || browseData.error) {
+    setStatus('idle', '');
+    return;
+  }
+
+  const r = await fetch('/export_folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ folder: browseData.folder })
+  });
+  const result = await r.json();
+  if (result.error) {
+    setStatus('error', result.error);
+  } else {
+    setStatus('done', t('export_folder_set'));
+  }
+}
+
+function toggleProjectMenu() {
+  document.getElementById('project-menu').classList.toggle('open');
+}
+function closeProjectMenu() {
+  document.getElementById('project-menu').classList.remove('open');
+}
+// Close project menu when clicking outside
+document.addEventListener('click', e => {
+  const wrap = document.getElementById('project-menu-wrap');
+  if (wrap && !wrap.contains(e.target)) closeProjectMenu();
+});
 
 function toggleProjectsDrawer() {
   const overlay = document.getElementById('projects-overlay');

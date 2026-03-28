@@ -26,6 +26,10 @@ const LANGS = {
     transcript_label: "TRANSCRIPT — select text to mark clips",
     upload_prompt: "Drag a WAV / MP3 file or click to select",
     upload_hint: "transcription via OpenAI Whisper",
+    diarize_label: "Detect multiple speakers",
+    diarize_hint: "adds ~1 min processing time",
+    diarize_notice: "Speaker detection is approximate. Right-click a speaker badge to reassign.",
+    badge_tooltip: "Click to rename · Right-click to reassign",
     clips_title: "CLIPS",
     clips_empty: "— select text in transcript to mark clips —",
     cut_clips: "✂ cut clips",
@@ -55,6 +59,12 @@ const LANGS = {
     assemble: "▶ assemble rough cut",
     clear: "clear",
     save_project: "save project",
+    export_folder: "export folder…",
+    export_folder_set: "Export folder set",
+    export_folder_cleared: "Export folder cleared",
+    export_folder_current: "Current export folder:",
+    export_folder_change: "OK to choose a new folder, Cancel to disable export.",
+    export_folder_picking: "Choose a folder…",
     gap_label: "gap between clips",
     download_output: "⬇ download rough cut",
     reassemble: "↺ re-assemble",
@@ -80,6 +90,10 @@ const LANGS = {
 
     // Status messages
     transcribing: "transcribing…",
+    step_compress: "compressing",
+    step_whisper: "transcribing",
+    step_process: "processing",
+    step_speakers: "speakers",
     transcribed: "transcribed · {count} passages",
     cutting_clips: "cutting clips…",
     clips_cut: "clips cut",
@@ -122,7 +136,7 @@ const LANGS = {
     // Topbar
     projects: "פרויקטים",
     new_project: "+ פרויקט חדש",
-    idle: "מוכן",
+    idle: "פנוי",
 
     // Projects drawer
     projects_title: "פרויקטים",
@@ -135,14 +149,18 @@ const LANGS = {
     duplicate: "שכפל",
 
     // Phase bar
-    phase_interview: "ראיון",
+    phase_interview: "תמלול וחיתוך אינסרטים",
     phase_narration: "קריינות (אופציונלי)",
-    phase_assembly: "הרכבה",
+    phase_assembly: "הרכבת קובץ סופי",
 
     // Phase 1: Transcript
     transcript_label: "תמלול — סמן טקסט לסימון קליפים",
     upload_prompt: "גרור קובץ WAV / MP3 או לחץ לבחירה",
     upload_hint: "תמלול באמצעות OpenAI Whisper",
+    diarize_label: "זיהוי דוברים מרובים",
+    diarize_hint: "מוסיף כדקה לזמן העיבוד",
+    diarize_notice: "זיהוי הדוברים הוא משוער. לחיצה על כפתור עכבר ימני תשנה את שיוך הדובר.",
+    badge_tooltip: "לחצו לשינוי שם · לחצו ימני לשינוי שיוך",
     clips_title: "קליפים",
     clips_empty: "— סמן טקסט בתמלול כדי ליצור קליפים —",
     cut_clips: "✂ חתוך קליפים",
@@ -172,6 +190,12 @@ const LANGS = {
     assemble: "הרכב קובץ שלם ◀",
     clear: "נקה",
     save_project: "שמור פרויקט",
+    export_folder: "תיקיית ייצוא…",
+    export_folder_set: "תיקיית ייצוא הוגדרה",
+    export_folder_cleared: "תיקיית ייצוא בוטלה",
+    export_folder_current: "תיקיית ייצוא נוכחית:",
+    export_folder_change: "OK לבחירת תיקייה חדשה, Cancel לביטול ייצוא.",
+    export_folder_picking: "בחרו תיקייה…",
     gap_label: "הפסקה בין קליפים",
     download_output: "הורידו קובץ סופי ⬇",
     reassemble: "↺ הרכב מחדש",
@@ -197,6 +221,10 @@ const LANGS = {
 
     // Status messages
     transcribing: "מתמלל…",
+    step_compress: "דחיסה",
+    step_whisper: "תמלול",
+    step_process: "עיבוד",
+    step_speakers: "דוברים",
     transcribed: "תמלול הושלם · {count} קטעים",
     cutting_clips: "חותך קליפים…",
     clips_cut: "קליפים נחתכו",

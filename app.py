@@ -1465,6 +1465,113 @@ def duplicate_project():
     return jsonify({"ok": True, "name": new_name, "state": loaded_state})
 
 
+@app.route("/load_demo", methods=["POST"])
+def load_demo():
+    """Load the bundled demo interview and start transcription with diarization."""
+    data = request.json or {}
+    lang = data.get("language", "en")
+    demo_filename = f"demo_interview_{lang}.mp3"
+    demo_src = os.path.join("demo", demo_filename)
+    if not os.path.exists(demo_src):
+        # Fallback to English
+        demo_filename = "demo_interview_en.mp3"
+        demo_src = os.path.join("demo", demo_filename)
+        lang = "en"
+    if not os.path.exists(demo_src):
+        return jsonify({"error": "Demo file not found"}), 404
+
+    # Create a fresh session for the demo
+    set_project_dir(os.path.join("projects", "_session"))
+    sf = state_file()
+    if os.path.exists(sf):
+        os.unlink(sf)
+
+    # Copy demo file into project uploads
+    dest = os.path.join(pdir("uploads"), demo_filename)
+    shutil.copy2(demo_src, dest)
+
+    # Start transcription with diarization in background
+    def do_demo_transcribe():
+        state = load_state()
+        state["source_file"] = dest
+        state["status"] = "transcribing"
+        save_state(state)
+
+        try:
+            # Get audio duration
+            try:
+                dur_result = subprocess.run(
+                    ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", dest],
+                    capture_output=True, text=True)
+                progress["audio_duration"] = float(dur_result.stdout.strip())
+            except Exception:
+                progress["audio_duration"] = 0
+
+            progress.update(phase="transcribe", current=0, total=2, message="sending to Whisper…")
+
+            whisper_kwargs = {
+                "model": "whisper-1",
+                "response_format": "verbose_json",
+                "timestamp_granularities": ["word", "segment"],
+                "language": lang,
+            }
+            with open(dest, "rb") as audio_file:
+                whisper_kwargs["file"] = audio_file
+                result = client.audio.transcriptions.create(**whisper_kwargs)
+
+            words = []
+            if hasattr(result, 'words') and result.words:
+                for w in result.words:
+                    words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
+
+            raw = [{"start": seg.start, "end": seg.end, "text": seg.text.strip()} for seg in result.segments]
+            passages = merge_segments(raw)
+
+            segments = []
+            for i, p in enumerate(passages):
+                segments.append({
+                    "id": i,
+                    "start": p["start"],
+                    "end": p["end"],
+                    "text": p["text"],
+                    "speaker": "S1",
+                })
+
+            progress.update(current=progress["total"] - 1, message="processing segments…")
+
+            # Diarization
+            if os.environ.get("HUGGINGFACE_TOKEN"):
+                progress.update(message="detecting speakers…")
+                segments = assign_speakers(segments, dest)
+
+            seen = []
+            for seg in segments:
+                spk = seg.get("speaker", "S1")
+                if spk not in seen:
+                    seen.append(spk)
+            speaker_names = {spk: spk for spk in seen}
+
+            state["transcript"] = segments
+            state["words"] = words
+            state["text_clips"] = []
+            state["clips"] = []
+            state["status"] = "transcribed"
+            state["filename"] = demo_filename
+            state["transcription_language"] = lang
+            state["speaker_names"] = speaker_names
+            state["project_name"] = "Demo"
+            save_state(state)
+            progress.update(current=progress["total"], message="done", phase=None)
+
+        except Exception as e:
+            state["status"] = f"error: {friendly_error(e)}"
+            save_state(state)
+            progress.update(phase=None, current=0, total=0, message="")
+
+    threading.Thread(target=do_demo_transcribe).start()
+    return jsonify({"ok": True, "filename": "demo_interview.mp3"})
+
+
 @app.route("/reset", methods=["POST"])
 def reset():
     set_project_dir(os.path.join("projects", "_session"))

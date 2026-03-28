@@ -412,6 +412,9 @@
           </label>
           <small id="diarize-hint" style="display:none;font-family:var(--sans);font-size:11px;color:var(--text2);margin-top:2px" data-i18n="diarize_hint"></small>
           <button class="btn btn-primary" onclick="document.getElementById('audio-input').click()" style="width:auto;margin-top:10px;padding:8px 20px" data-i18n="choose_file"></button>
+          <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
+            <button class="btn" onclick="loadDemo()" style="width:auto;padding:6px 16px;font-size:12px;opacity:0.7" data-i18n="try_demo"></button>
+          </div>
         </div>
         <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
         <div id="speaker-legend"></div>
@@ -705,6 +708,28 @@ function renderAll() {
 }
 
 // ── TRANSCRIBE ──
+async function loadDemo() {
+  document.getElementById('upload-zone').style.display = 'none';
+  document.getElementById('file-info').textContent = 'demo_interview.mp3';
+  // Enable diarization for demo
+  document.getElementById('diarize-toggle').checked = true;
+  setStatus('working', t('transcribing'));
+  const whisperLang = document.getElementById('whisper-lang').value;
+  const res = await fetch('/load_demo', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ language: whisperLang })
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({ error: t('server_error') }));
+    setStatus('error', data.error || t('transcription_failed'));
+    document.getElementById('upload-zone').style.display = '';
+    return;
+  }
+  startProgressPolling();
+  startPolling();
+}
+
 async function uploadAndTranscribe(event) {
   const file = event.target.files[0];
   if (!file) return;

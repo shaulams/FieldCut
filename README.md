@@ -51,6 +51,9 @@ source .venv/bin/activate
 # Install dependencies
 pip install -r requirements.txt
 
+# Optional: speaker detection (pulls ~2GB of PyTorch models)
+pip install -r requirements-speaker.txt
+
 # Run
 python app.py
 ```

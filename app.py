@@ -1076,6 +1076,17 @@ def export_paper_edit():
     return send_file(out_path, as_attachment=True, download_name=docx_name)
 
 
+# ─── PATH SAFETY ─────────────────────────────────────────
+
+def safe_project_path(filepath):
+    """Validate that a file path is within the projects/ or demo/ directory."""
+    abs_path = os.path.realpath(filepath)
+    for allowed in [os.path.realpath("projects"), os.path.realpath("demo")]:
+        if abs_path.startswith(allowed + os.sep) or abs_path == allowed:
+            return abs_path
+    from flask import abort
+    abort(403)
+
 # ─── AUDIO ────────────────────────────────────────────────
 
 @app.route("/waveform")
@@ -1084,7 +1095,10 @@ def waveform():
     filepath = request.args.get("file", "")
     n_points = int(request.args.get("points", 1000))
 
-    if not filepath or not os.path.exists(filepath):
+    if not filepath:
+        return jsonify({"error": "File not found"}), 404
+    filepath = safe_project_path(filepath)
+    if not os.path.exists(filepath):
         return jsonify({"error": "File not found"}), 404
 
     # Extract mono PCM at 100 Hz — manageable even for 2-hour files
@@ -1127,7 +1141,10 @@ def audio_snippet():
     start = request.args.get("start", type=float, default=0)
     end = request.args.get("end", type=float, default=0)
 
-    if not filepath or not os.path.exists(filepath):
+    if not filepath:
+        return "File not found", 404
+    filepath = safe_project_path(filepath)
+    if not os.path.exists(filepath):
         return "File not found", 404
 
     duration = end - start
@@ -1158,13 +1175,15 @@ def audio_snippet():
 @app.route("/audio/<path:filepath>")
 def stream_audio(filepath):
     """Serve audio files for in-browser playback."""
+    filepath = safe_project_path(filepath)
     if not os.path.exists(filepath):
         return "Not found", 404
     return send_file(filepath, mimetype="audio/wav", conditional=True)
 
 @app.route("/download/<path:filename>")
 def download(filename):
-    return send_file(os.path.join(pdir("output"), filename), as_attachment=True)
+    filepath = safe_project_path(os.path.join(pdir("output"), filename))
+    return send_file(filepath, as_attachment=True)
 
 @app.route("/export_clips_zip")
 def export_clips_zip():

@@ -2,4 +2,3 @@ flask>=3.0.0
 openai>=1.30.0
 python-docx>=1.0.0
 python-dotenv>=1.0.0
-pyannote.audio>=3.0.0  # optional: speaker diarization (requires HUGGINGFACE_TOKEN)

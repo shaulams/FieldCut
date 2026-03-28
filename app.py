@@ -1594,6 +1594,9 @@ def setup_status():
 @app.route("/setup/save_keys", methods=["POST"])
 def setup_save_keys():
     """Validate and save API keys to .env file."""
+    # Only allow from localhost for security
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"error": "Setup only available from localhost"}), 403
     data = request.json or {}
     openai_key = data.get("openai_key", "").strip()
     hf_token = data.get("hf_token", "").strip()

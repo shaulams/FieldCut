@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "skills": {
+    "flask": {
+      "source": "bobmatnyc/claude-mpm-skills",
+      "sourceType": "github",
+      "computedHash": "a50e91ca4219861d845fc5a6d76738200b8c6820a05613c2bd44e7e8d7b345db"
+    },
+    "openai-whisper-api": {
+      "source": "steipete/clawdis",
+      "sourceType": "github",
+      "computedHash": "713474c804f58aa277db04770703d542a2ee5f42903a0eb68e4a5277ba584921"
+    },
+    "pytest": {
+      "source": "bobmatnyc/claude-mpm-skills",
+      "sourceType": "github",
+      "computedHash": "91ee61c66315a02b9fd3165488604f20d84a1f55cfbeedbbb35c6d0b6fc5e1e3"
+    },
+    "requesting-code-review": {
+      "source": "obra/superpowers",
+      "sourceType": "github",
+      "computedHash": "246e65cd72a7e360987d94e6c61564ce6d71c6361d1784d529d70e4cbbe8522d"
+    },
+    "security-auditor": {
+      "source": "ovachiever/droid-tings",
+      "sourceType": "github",
+      "computedHash": "b227fd3f9df74d4c3f25d441199069829669ed4c35a39b46436616c030df40ad"
+    }
+  }
+}

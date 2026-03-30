@@ -4,10 +4,10 @@ These tests verify the full flow without hitting external APIs.
 Transcription is simulated; ffmpeg cutting is real.
 """
 
-import json
 import os
-import time
 import subprocess
+import time
+
 import pytest
 
 
@@ -31,9 +31,15 @@ class TestCutPipeline:
         app_module.save_state(sample_state)
 
         # Mark a clip
-        resp = client.post("/add_clip", json={
-            "start": 0.0, "end": 0.5, "text": "Hello", "source": "interview",
-        })
+        resp = client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 0.5,
+                "text": "Hello",
+                "source": "interview",
+            },
+        )
         assert resp.status_code == 200
 
         # Cut clips
@@ -59,12 +65,24 @@ class TestCutPipeline:
         sample_state["source_file"] = sample_wav
         app_module.save_state(sample_state)
 
-        client.post("/add_clip", json={
-            "start": 0.0, "end": 0.3, "text": "Part one", "source": "interview",
-        })
-        client.post("/add_clip", json={
-            "start": 0.4, "end": 0.8, "text": "Part two", "source": "interview",
-        })
+        client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 0.3,
+                "text": "Part one",
+                "source": "interview",
+            },
+        )
+        client.post(
+            "/add_clip",
+            json={
+                "start": 0.4,
+                "end": 0.8,
+                "text": "Part two",
+                "source": "interview",
+            },
+        )
 
         resp = client.post("/cut_clips")
         assert resp.status_code == 200
@@ -87,10 +105,11 @@ class TestWaveformPipeline:
     """Test waveform extraction."""
 
     def test_waveform_from_wav(self, client, app, sample_wav, monkeypatch):
-        import app as app_module
-
         # Copy wav into the project uploads dir
         import shutil
+
+        import app as app_module
+
         dest = os.path.join(app_module.pdir("uploads"), "test.wav")
         shutil.copy2(sample_wav, dest)
 

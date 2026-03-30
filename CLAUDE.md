@@ -20,13 +20,15 @@ who record field interviews and produce narrative audio pieces (radio documentar
 
 ## Stack
 
-- **Backend**: Python / Flask (app.py)
-- **Frontend**: Single HTML template (templates/index.html) — vanilla JS, no framework
+- **Backend**: Python / Flask (app.py) — vanilla, no framework beyond Flask
+- **Frontend**: Vanilla JS + CSS — no framework, no build step
 - **Audio processing**: ffmpeg (must be installed on the system)
 - **Transcription**: OpenAI Whisper API (`whisper-1` model, `verbose_json` format with word + segment timestamps)
 - **Speaker diarization**: pyannote.audio (optional, requires HUGGINGFACE_TOKEN)
 - **State**: JSON file per project — no database
 - **Config**: config.json (app-wide settings like export folder)
+- **Linting/Formatting**: ruff (config in pyproject.toml)
+- **Testing**: pytest (config in pyproject.toml)
 - **Port**: 5555
 
 ## Project structure
@@ -35,8 +37,12 @@ who record field interviews and produce narrative audio pieces (radio documentar
 fieldcut/
 ├── CLAUDE.md           ← you are here
 ├── app.py              ← Flask server, all routes
+├── Makefile            ← dev commands (make setup/run/test/lint/format)
+├── pyproject.toml      ← ruff + pytest config
 ├── requirements.txt    ← core deps (flask, openai, python-docx, dotenv)
+├── requirements-dev.txt ← dev deps (pytest, ruff, pre-commit)
 ├── requirements-speaker.txt ← optional (pyannote.audio for diarization)
+├── .pre-commit-config.yaml ← ruff pre-commit hooks
 ├── .env                ← API keys (gitignored)
 ├── config.json         ← app-wide settings (gitignored)
 ├── demo/               ← bundled demo interviews (en, he)
@@ -44,6 +50,13 @@ fieldcut/
 │   └── lang.js         ← i18n strings (English, Hebrew)
 ├── templates/
 │   └── index.html      ← full UI (transcript, timeline, assembly panel)
+├── tests/              ← pytest test suite
+│   ├── conftest.py     ← shared fixtures
+│   ├── test_helpers.py ← unit tests for helper functions
+│   ├── test_routes.py  ← Flask route tests
+│   └── test_pipeline.py ← integration tests (require ffmpeg)
+├── .agents/skills/     ← agent skills (Codex, Claude Code, etc.)
+├── .claude/skills/     ← symlinks to .agents/skills/
 └── projects/           ← per-project data (gitignored)
     ├── _session/       ← default temporary project
     └── {project_name}/ ← saved projects
@@ -66,8 +79,11 @@ The app has a first-run setup wizard that creates `.env` if missing.
 
 Run with:
 ```bash
-pip install -r requirements.txt
-python app.py
+make setup    # creates venv, installs all deps
+make run      # starts the server on port 5555
+make test     # runs pytest
+make lint     # checks ruff lint + format
+make format   # auto-fixes formatting
 ```
 
 ## Key API routes
@@ -155,3 +171,26 @@ python app.py
 - Dark and light themes
 - Speaker colors: S1 green, S2 blue, S3 orange, S4 purple
 - Bilingual: English + Hebrew (add more in static/lang.js)
+
+## Development rules
+
+- **No frameworks on the frontend** — vanilla JS only, no React/Vue/Angular, no build step
+- **No database** — JSON file per project is the persistence model
+- **Run `make lint` before committing** — CI enforces ruff checks
+- **Add tests for new routes** — use the fixtures in `tests/conftest.py`
+- **Use `friendly_error()`** for user-facing error messages
+- **Keep it simple** — this is a tool for journalists, not a tech demo
+
+## Agent skills
+
+Developer skills are installed in `.agents/skills/` (works with Codex, Claude Code, Cursor, Gemini CLI, and others). Symlinked to `.claude/skills/` for Claude Code.
+
+Installed skills:
+- **flask** — Flask patterns, blueprints, testing, extensions
+- **pytest** — Fixtures, parametrize, mocking, Flask test client
+- **security-auditor** — OWASP Top 10 scanning, vulnerability patterns
+- **openai-whisper-api** — Whisper transcription API reference
+- **requesting-code-review** — Structured code review workflow
+- **run-tests** — Full test suite: unit, integration, e2e API, browser smoke tests
+
+To install more: `npx skills find <query>` then `npx skills add <package>`

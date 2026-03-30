@@ -29,5 +29,11 @@ firebase-debug.log
 REVIEW.md
 docs/plans/
 
+# Agent tool caches
+.pi/
+
+# Test artifacts
+test-results/
+
 # Misc
 {static,templates,clips,output}

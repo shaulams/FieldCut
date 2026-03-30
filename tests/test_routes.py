@@ -1,9 +1,5 @@
 """Test Flask routes — basic smoke tests for all endpoints."""
 
-import json
-import os
-import io
-
 
 class TestBasicRoutes:
     """Test that core routes respond correctly."""
@@ -60,6 +56,7 @@ class TestTranscribeValidation:
     def test_transcribe_no_api_key_returns_500(self, client, monkeypatch, sample_wav):
         """Without OPENAI_API_KEY, transcription should fail gracefully."""
         import app as app_module
+
         monkeypatch.setattr(app_module, "client", None)
         with open(sample_wav, "rb") as f:
             resp = client.post(
@@ -76,14 +73,18 @@ class TestClipOperations:
 
     def test_add_clip(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
-        resp = client.post("/add_clip", json={
-            "start": 0.0,
-            "end": 2.5,
-            "text": "Hello world",
-            "source": "interview",
-        })
+        resp = client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 2.5,
+                "text": "Hello world",
+                "source": "interview",
+            },
+        )
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["ok"] is True
@@ -92,16 +93,29 @@ class TestClipOperations:
 
     def test_add_multiple_clips_sorted(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
         # Add clip at 5.0-8.0 first
-        client.post("/add_clip", json={
-            "start": 5.0, "end": 8.0, "text": "I am fine", "source": "interview",
-        })
+        client.post(
+            "/add_clip",
+            json={
+                "start": 5.0,
+                "end": 8.0,
+                "text": "I am fine",
+                "source": "interview",
+            },
+        )
         # Then add clip at 0.0-2.5
-        resp = client.post("/add_clip", json={
-            "start": 0.0, "end": 2.5, "text": "Hello world", "source": "interview",
-        })
+        resp = client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 2.5,
+                "text": "Hello world",
+                "source": "interview",
+            },
+        )
         data = resp.get_json()
         clips = data["clips"]
         assert len(clips) == 2
@@ -112,26 +126,46 @@ class TestClipOperations:
 
     def test_remove_clip(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
         # Add then remove
-        client.post("/add_clip", json={
-            "start": 0.0, "end": 2.5, "text": "Hello", "source": "interview",
-        })
+        client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 2.5,
+                "text": "Hello",
+                "source": "interview",
+            },
+        )
         resp = client.post("/remove_clip", json={"id": "clip_01", "source": "interview"})
         assert resp.status_code == 200
         assert len(resp.get_json()["clips"]) == 0
 
     def test_trim_clip(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
-        client.post("/add_clip", json={
-            "start": 0.0, "end": 2.5, "text": "Hello", "source": "interview",
-        })
-        resp = client.post("/trim_clip", json={
-            "id": "clip_01", "source": "interview", "start": 0.2, "end": 2.3,
-        })
+        client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 2.5,
+                "text": "Hello",
+                "source": "interview",
+            },
+        )
+        resp = client.post(
+            "/trim_clip",
+            json={
+                "id": "clip_01",
+                "source": "interview",
+                "start": 0.2,
+                "end": 2.3,
+            },
+        )
         assert resp.status_code == 200
 
         # Verify state was updated
@@ -143,28 +177,48 @@ class TestClipOperations:
     def test_trim_clip_prevents_invalid_range(self, client, app, sample_state):
         """start >= end should be corrected to start + 0.1."""
         import app as app_module
+
         app_module.save_state(sample_state)
 
-        client.post("/add_clip", json={
-            "start": 1.0, "end": 2.0, "text": "Test", "source": "interview",
-        })
-        client.post("/trim_clip", json={
-            "id": "clip_01", "source": "interview", "start": 3.0, "end": 2.0,
-        })
+        client.post(
+            "/add_clip",
+            json={
+                "start": 1.0,
+                "end": 2.0,
+                "text": "Test",
+                "source": "interview",
+            },
+        )
+        client.post(
+            "/trim_clip",
+            json={
+                "id": "clip_01",
+                "source": "interview",
+                "start": 3.0,
+                "end": 2.0,
+            },
+        )
         state = app_module.load_state()
         clip = state["text_clips"][0]
         assert clip["end"] > clip["start"]
 
     def test_add_narration_clip(self, client, app, sample_state):
         import app as app_module
+
         sample_state["narration_transcript"] = [
             {"id": 0, "start": 0.0, "end": 3.0, "text": "Narration text"},
         ]
         app_module.save_state(sample_state)
 
-        resp = client.post("/add_clip", json={
-            "start": 0.0, "end": 3.0, "text": "Narration text", "source": "narration",
-        })
+        resp = client.post(
+            "/add_clip",
+            json={
+                "start": 0.0,
+                "end": 3.0,
+                "text": "Narration text",
+                "source": "narration",
+            },
+        )
         data = resp.get_json()
         assert data["ok"] is True
         assert data["clips"][0]["id"] == "narr_01"
@@ -175,6 +229,7 @@ class TestCutClips:
 
     def test_cut_no_clips_returns_400(self, client, app, sample_state, sample_wav):
         import app as app_module
+
         sample_state["source_file"] = sample_wav
         sample_state["text_clips"] = []
         app_module.save_state(sample_state)
@@ -184,6 +239,7 @@ class TestCutClips:
 
     def test_cut_no_source_returns_400(self, client, app, sample_state):
         import app as app_module
+
         sample_state["source_file"] = "/nonexistent/file.wav"
         sample_state["text_clips"] = [
             {"id": "clip_01", "start": 0.0, "end": 1.0, "text": "Test"},
@@ -234,22 +290,32 @@ class TestSpeakers:
 
     def test_rename_speaker(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
-        resp = client.post("/rename_speaker", json={
-            "speaker_id": "S1", "display_name": "Interviewer",
-        })
+        resp = client.post(
+            "/rename_speaker",
+            json={
+                "speaker_id": "S1",
+                "display_name": "Interviewer",
+            },
+        )
         assert resp.status_code == 200
         names = resp.get_json()["speaker_names"]
         assert names["S1"] == "Interviewer"
 
     def test_reassign_speaker(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
-        resp = client.post("/reassign_speaker", json={
-            "segment_id": 0, "speaker": "S2",
-        })
+        resp = client.post(
+            "/reassign_speaker",
+            json={
+                "segment_id": 0,
+                "speaker": "S2",
+            },
+        )
         assert resp.status_code == 200
         transcript = resp.get_json()["transcript"]
         assert transcript[0]["speaker"] == "S2"
@@ -264,13 +330,17 @@ class TestMetadata:
 
     def test_update_metadata(self, client, app, sample_state):
         import app as app_module
+
         app_module.save_state(sample_state)
 
-        resp = client.post("/update_metadata", json={
-            "interviewee": "John Doe",
-            "recording_date": "2025-01-15",
-            "notes": "Test interview",
-        })
+        resp = client.post(
+            "/update_metadata",
+            json={
+                "interviewee": "John Doe",
+                "recording_date": "2025-01-15",
+                "notes": "Test interview",
+            },
+        )
         assert resp.status_code == 200
         state = app_module.load_state()
         assert state["interviewee"] == "John Doe"
@@ -298,11 +368,102 @@ class TestAudioEndpoints:
         assert resp.status_code == 400
 
 
+class TestAssemblyOrder:
+    """Test assembly order persistence."""
+
+    def test_save_and_get_assembly_order(self, client, app, sample_state):
+        import app as app_module
+
+        app_module.save_state(sample_state)
+
+        order = [{"type": "clip", "id": "clip_01"}, {"type": "narration", "file": "intro.wav"}]
+        resp = client.post("/assembly_order", json={"order": order})
+        assert resp.status_code == 200
+        assert resp.get_json()["ok"] is True
+
+        # Verify it was persisted
+        resp = client.get("/assembly_order")
+        assert resp.status_code == 200
+        assert resp.get_json()["assembly"] == order
+
+        # Also verify via full state
+        state = app_module.load_state()
+        assert state["assembly"] == order
+
+    def test_get_assembly_order_empty_default(self, client):
+        resp = client.get("/assembly_order")
+        assert resp.status_code == 200
+        assert resp.get_json()["assembly"] == []
+
+    def test_clear_assembly_order(self, client, app, sample_state):
+        import app as app_module
+
+        app_module.save_state(sample_state)
+
+        # Set then clear
+        client.post("/assembly_order", json={"order": [{"type": "clip", "id": "clip_01"}]})
+        client.post("/assembly_order", json={"order": []})
+
+        state = app_module.load_state()
+        assert state["assembly"] == []
+
+
+class TestTrimStateSync:
+    """Test that trim operations update state consistently."""
+
+    def test_trim_updates_state_correctly(self, client, app, sample_state):
+        """Verify /state reflects trim changes immediately."""
+        import app as app_module
+
+        app_module.save_state(sample_state)
+
+        # Add a clip
+        client.post(
+            "/add_clip",
+            json={"start": 0.0, "end": 2.5, "text": "Hello world", "source": "interview"},
+        )
+
+        # Trim it
+        client.post(
+            "/trim_clip",
+            json={"id": "clip_01", "source": "interview", "start": 0.3},
+        )
+
+        # Fetch full state — should reflect the trim
+        resp = client.get("/state")
+        state = resp.get_json()
+        clip = state["text_clips"][0]
+        assert clip["start"] == 0.3
+        assert clip["end"] == 2.5
+
+    def test_multiple_trims_accumulate(self, client, app, sample_state):
+        """Multiple sequential trims should all be reflected in state."""
+        import app as app_module
+
+        app_module.save_state(sample_state)
+
+        client.post(
+            "/add_clip",
+            json={"start": 0.0, "end": 5.0, "text": "Test clip", "source": "interview"},
+        )
+
+        # Trim start forward
+        client.post("/trim_clip", json={"id": "clip_01", "source": "interview", "start": 0.5})
+        # Trim end backward
+        client.post("/trim_clip", json={"id": "clip_01", "source": "interview", "end": 4.0})
+
+        state = app_module.load_state()
+        clip = state["text_clips"][0]
+        assert clip["start"] == 0.5
+        assert clip["end"] == 4.0
+
+
 class TestExportTranscript:
     """Test transcript export."""
 
     def test_export_no_clips(self, client, app, sample_state):
         import app as app_module
+
         sample_state["text_clips"] = []
         app_module.save_state(sample_state)
 

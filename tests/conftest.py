@@ -1,12 +1,9 @@
 """Shared fixtures for FieldCut tests."""
 
 import os
-import sys
-import json
-import shutil
 import struct
-import tempfile
-import subprocess
+import sys
+
 import pytest
 
 # Add project root to path
@@ -22,6 +19,7 @@ def app(tmp_path):
 
     # Redirect project directory to temp
     import app as app_module
+
     original_dir = app_module._active_project_dir
     test_project_dir = str(tmp_path / "projects" / "_session")
     app_module.set_project_dir(test_project_dir)
@@ -55,13 +53,13 @@ def sample_wav(tmp_path):
         f.write(struct.pack("<I", 36 + data_size))
         f.write(b"WAVE")
         f.write(b"fmt ")
-        f.write(struct.pack("<I", 16))          # chunk size
-        f.write(struct.pack("<H", 1))           # PCM
-        f.write(struct.pack("<H", 1))           # mono
+        f.write(struct.pack("<I", 16))  # chunk size
+        f.write(struct.pack("<H", 1))  # PCM
+        f.write(struct.pack("<H", 1))  # mono
         f.write(struct.pack("<I", sample_rate))
         f.write(struct.pack("<I", sample_rate * 2))  # byte rate
-        f.write(struct.pack("<H", 2))           # block align
-        f.write(struct.pack("<H", 16))          # bits per sample
+        f.write(struct.pack("<H", 2))  # block align
+        f.write(struct.pack("<H", 16))  # bits per sample
         f.write(b"data")
         f.write(struct.pack("<I", data_size))
         f.write(samples)

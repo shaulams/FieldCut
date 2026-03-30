@@ -1,10 +1,18 @@
-import os, json, subprocess, tempfile, threading, time, io, shutil, struct
-from pathlib import Path
-from flask import Flask, render_template, request, jsonify, send_file, Response, abort
+import io
+import json
+import os
+import shutil
+import struct
+import subprocess
+import tempfile
+import threading
+
+from flask import Flask, Response, abort, jsonify, render_template, request, send_file
 
 # Optional diarization — requires HUGGINGFACE_TOKEN in .env
 _diarization_pipeline = None
 _diarization_lock = threading.Lock()
+
 
 def get_diarization_pipeline():
     global _diarization_pipeline
@@ -14,8 +22,9 @@ def get_diarization_pipeline():
     with _diarization_lock:
         if _diarization_pipeline is None:
             try:
-                from pyannote.audio import Pipeline
                 import torch
+                from pyannote.audio import Pipeline
+
                 _diarization_pipeline = Pipeline.from_pretrained(
                     "pyannote/speaker-diarization-community-1",
                     token=token,
@@ -30,6 +39,7 @@ def get_diarization_pipeline():
                 print(f"⚠️  Diarization pipeline failed to load: {e}")
                 return None
     return _diarization_pipeline
+
 
 def assign_speakers(segments, audio_path):
     """Run pyannote diarization and assign speaker labels to segments."""
@@ -51,10 +61,9 @@ def assign_speakers(segments, audio_path):
 
         result = pipeline(wav_path)
         # pyannote 3.x returns DiarizeOutput; extract the Annotation object
-        diarization = getattr(result, 'speaker_diarization', result)
+        diarization = getattr(result, "speaker_diarization", result)
         # Build list of (start, end, speaker) turns
-        turns = [(turn.start, turn.end, speaker)
-                 for turn, _, speaker in diarization.itertracks(yield_label=True)]
+        turns = [(turn.start, turn.end, speaker) for turn, _, speaker in diarization.itertracks(yield_label=True)]
         # Map each segment to the speaker with the most overlap
         speaker_map = {}  # pyannote label → S1/S2/...
         for seg in segments:
@@ -77,9 +86,12 @@ def assign_speakers(segments, audio_path):
     except Exception as e:
         print(f"⚠️  Diarization failed: {e}")
         if tmp_wav:
-            try: os.unlink(tmp_wav.name)
-            except: pass
+            try:
+                os.unlink(tmp_wav.name)
+            except OSError:
+                pass
         return segments
+
 
 # Speaker color mapping (matches frontend SPK_COLORS)
 SPK_COLORS_RGB = {
@@ -88,6 +100,7 @@ SPK_COLORS_RGB = {
     "S3": (0xC8, 0x8C, 0x32),
     "S4": (0xA0, 0x50, 0xB4),
 }
+
 
 def get_clip_speaker(clip, transcript):
     """Find which speaker has the most overlap with this clip's time range."""
@@ -99,19 +112,22 @@ def get_clip_speaker(clip, transcript):
             best = seg.get("speaker", "S1")
     return best
 
+
 # Load .env file if present (so OPENAI_API_KEY persists across sessions)
 try:
     from dotenv import load_dotenv
+
     load_dotenv()
 except ImportError:
     pass
 
-from openai import OpenAI
+from openai import OpenAI  # noqa: E402  — must load .env before importing
 
 app = Flask(__name__)
 
 # ─── APP CONFIG ──────────────────────────────────────────
 _config_path = "config.json"
+
 
 def load_config():
     if os.path.exists(_config_path):
@@ -119,9 +135,11 @@ def load_config():
             return json.load(f)
     return {}
 
+
 def save_config(cfg):
     with open(_config_path, "w") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
 
 def copy_to_export_folder(filepath):
     """Copy a file to the configured export folder, if set."""
@@ -137,14 +155,17 @@ def copy_to_export_folder(filepath):
     except Exception as e:
         print(f"⚠️  Failed to copy to export folder: {e}")
 
+
 # ─── PROJECT DIRECTORY ────────────────────────────────────
 _active_project_dir = os.path.join("projects", "_session")
+
 
 def set_project_dir(path):
     global _active_project_dir
     _active_project_dir = path
-    for sub in ['uploads', 'clips', 'narration', 'output']:
+    for sub in ["uploads", "clips", "narration", "output"]:
         os.makedirs(os.path.join(path, sub), exist_ok=True)
+
 
 def friendly_error(e):
     """Convert a raw exception into a short, human-readable error message."""
@@ -163,6 +184,7 @@ def friendly_error(e):
     if "'message':" in msg:
         try:
             import re
+
             m = re.search(r"'message':\s*'([^']+)'", msg)
             if m:
                 return m.group(1)[:120]
@@ -170,11 +192,13 @@ def friendly_error(e):
             pass
     return msg[:120]  # cap length so it fits in the UI
 
+
 def pdir(folder=""):
     """Return path to a subfolder in the active project directory, creating it if needed."""
     path = os.path.join(_active_project_dir, folder) if folder else _active_project_dir
     os.makedirs(path, exist_ok=True)
     return path
+
 
 os.makedirs("projects", exist_ok=True)
 set_project_dir(_active_project_dir)
@@ -184,16 +208,19 @@ client = OpenAI(api_key=api_key) if api_key else None
 if not api_key:
     print("⚠️  OPENAI_API_KEY not set. Create a .env file with: OPENAI_API_KEY=sk-...")
 
+
 def reload_api_keys():
     """Reload API keys from .env without restarting the server."""
     global api_key, client
     try:
         from dotenv import load_dotenv
+
         load_dotenv(override=True)
     except ImportError:
         pass
     api_key = os.environ.get("OPENAI_API_KEY")
     client = OpenAI(api_key=api_key) if api_key else None
+
 
 # Check for ffmpeg
 try:
@@ -206,8 +233,10 @@ except (subprocess.CalledProcessError, FileNotFoundError):
 # Progress tracking for async operations
 progress = {"phase": None, "current": 0, "total": 0, "message": "", "audio_duration": 0}
 
+
 def state_file():
     return os.path.join(_active_project_dir, "state.json")
+
 
 def load_state():
     sf = state_file()
@@ -228,17 +257,29 @@ def load_state():
             else:
                 state["phase"] = 1
         return state
-    return {"transcript": [], "words": [], "clips": [], "text_clips": [],
-            "narration_transcript": [], "narration_words": [], "narr_text_clips": [],
-            "narration": [], "assembly": [], "source_file": None, "phase": 1}
+    return {
+        "transcript": [],
+        "words": [],
+        "clips": [],
+        "text_clips": [],
+        "narration_transcript": [],
+        "narration_words": [],
+        "narr_text_clips": [],
+        "narration": [],
+        "assembly": [],
+        "source_file": None,
+        "phase": 1,
+    }
+
 
 def save_state(state):
     with open(state_file(), "w") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
+
 def merge_segments(raw_segments, pause_threshold=1.0, sentence_gap=0.4, max_duration=45):
     """Merge short Whisper segments into longer passages based on pauses, punctuation, and max duration."""
-    SENTENCE_ENDERS = set('.?!。؟')
+    SENTENCE_ENDERS = set(".?!。؟")
     passages = []
     current = None
     for seg in raw_segments:
@@ -249,9 +290,11 @@ def merge_segments(raw_segments, pause_threshold=1.0, sentence_gap=0.4, max_dura
         cur_duration = current["end"] - current["start"]
         prev_ends_sentence = current["text"] and current["text"][-1] in SENTENCE_ENDERS
 
-        if (gap >= pause_threshold
+        if (
+            gap >= pause_threshold
             or (gap >= sentence_gap and prev_ends_sentence)
-            or (cur_duration >= max_duration and gap >= 0.2)):
+            or (cur_duration >= max_duration and gap >= 0.2)
+        ):
             passages.append(current)
             current = {**seg}
         else:
@@ -261,11 +304,14 @@ def merge_segments(raw_segments, pause_threshold=1.0, sentence_gap=0.4, max_dura
         passages.append(current)
     return passages
 
+
 # ─── ROUTES ───────────────────────────────────────────────
+
 
 @app.route("/")
 def index():
     return render_template("index.html")
+
 
 @app.route("/state")
 def get_state():
@@ -273,7 +319,9 @@ def get_state():
     resp.headers["Cache-Control"] = "no-store"
     return resp
 
+
 # ─── STEP 1: TRANSCRIBE ───────────────────────────────────
+
 
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
@@ -302,7 +350,9 @@ def transcribe():
             try:
                 dur_result = subprocess.run(
                     ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filepath],
-                    capture_output=True, text=True)
+                    capture_output=True,
+                    text=True,
+                )
                 progress["audio_duration"] = float(dur_result.stdout.strip())
             except Exception:
                 progress["audio_duration"] = 0
@@ -311,11 +361,11 @@ def transcribe():
             if os.path.getsize(filepath) > 25 * 1024 * 1024:
                 progress.update(phase="transcribe", current=0, total=3, message="compressing audio…")
                 compressed = filepath.rsplit(".", 1)[0] + "_compressed.mp3"
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", filepath,
-                    "-ac", "1", "-ar", "16000", "-b:a", "64k",
-                    compressed
-                ], capture_output=True, check=True)
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", filepath, "-ac", "1", "-ar", "16000", "-b:a", "64k", compressed],
+                    capture_output=True,
+                    check=True,
+                )
                 upload_path = compressed
                 progress.update(current=1, message="sending to Whisper…")
             else:
@@ -335,7 +385,7 @@ def transcribe():
 
             # Store word-level timestamps
             words = []
-            if hasattr(result, 'words') and result.words:
+            if hasattr(result, "words") and result.words:
                 for w in result.words:
                     words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
 
@@ -345,13 +395,15 @@ def transcribe():
 
             segments = []
             for i, p in enumerate(passages):
-                segments.append({
-                    "id": i,
-                    "start": p["start"],
-                    "end": p["end"],
-                    "text": p["text"],
-                    "speaker": "S1",
-                })
+                segments.append(
+                    {
+                        "id": i,
+                        "start": p["start"],
+                        "end": p["end"],
+                        "text": p["text"],
+                        "speaker": "S1",
+                    }
+                )
 
             progress.update(current=progress["total"] - 1, message="processing segments…")
 
@@ -387,20 +439,26 @@ def transcribe():
     threading.Thread(target=do_transcribe).start()
     return jsonify({"message": "Transcription started"})
 
+
 @app.route("/status")
 def status():
     state = load_state()
-    return jsonify({
-        "status": state.get("status", "idle"),
-        "segment_count": len(state.get("transcript", [])),
-        "filename": state.get("filename", "")
-    })
+    return jsonify(
+        {
+            "status": state.get("status", "idle"),
+            "segment_count": len(state.get("transcript", [])),
+            "filename": state.get("filename", ""),
+        }
+    )
+
 
 @app.route("/progress")
 def get_progress():
     return jsonify(progress)
 
+
 # ─── STEP 2: TEXT-BASED CLIP MARKING ──────────────────────
+
 
 @app.route("/add_clip", methods=["POST"])
 def add_clip():
@@ -422,13 +480,7 @@ def add_clip():
 
     # Auto-number
     clip_id = f"{prefix}_{len(clips) + 1:02d}"
-    clips.append({
-        "id": clip_id,
-        "start": round(start, 3),
-        "end": round(end, 3),
-        "text": text,
-        "source": source
-    })
+    clips.append({"id": clip_id, "start": round(start, 3), "end": round(end, 3), "text": text, "source": source})
 
     # Sort by start time and renumber
     clips.sort(key=lambda c: c["start"])
@@ -442,6 +494,7 @@ def add_clip():
 
     save_state(state)
     return jsonify({"ok": True, "clip_id": clip_id, "clips": clips})
+
 
 @app.route("/trim_clip", methods=["POST"])
 def trim_clip():
@@ -505,7 +558,9 @@ def remove_clip():
     save_state(state)
     return jsonify({"ok": True, "clips": clips})
 
+
 # ─── STEP 3: CUT CLIPS ────────────────────────────────────
+
 
 @app.route("/cut_clips", methods=["POST"])
 def cut_clips():
@@ -523,119 +578,130 @@ def cut_clips():
     save_state(state)
 
     def do_cut():
-      try:
-        st = load_state()
-        source_path = st.get("source_file", "")
-        if not source_path or not os.path.exists(source_path):
-            st["status"] = f"error: source file not found — {source_path}"
+        try:
+            st = load_state()
+            source_path = st.get("source_file", "")
+            if not source_path or not os.path.exists(source_path):
+                st["status"] = f"error: source file not found — {source_path}"
+                save_state(st)
+                progress.update(phase=None, message="")
+                return
+
+            clips = st.get("text_clips", [])
+            progress.update(phase="cut", current=0, total=len(clips), message=f"cutting 0/{len(clips)} clips…")
+
+            cut_files = []
+            for i, clip in enumerate(clips):
+                progress.update(current=i, message=f"cutting {clip['id']}… ({i + 1}/{len(clips)})")
+                out_path = os.path.join(pdir("clips"), f"{clip['id']}.wav")
+                duration = clip["end"] - clip["start"]
+                cmd = [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    source_path,
+                    "-ss",
+                    str(clip["start"]),
+                    "-t",
+                    str(duration),
+                    "-c:a",
+                    "pcm_s16le",
+                    "-ar",
+                    "44100",
+                    "-ac",
+                    "1",
+                    out_path,
+                ]
+                result = subprocess.run(cmd, capture_output=True, text=True)
+                if result.returncode == 0:
+                    cut_files.append(
+                        {
+                            "id": clip["id"],
+                            "path": out_path,
+                            "start": clip["start"],
+                            "end": clip["end"],
+                            "duration": round(duration, 2),
+                        }
+                    )
+
+            st["clips"] = cut_files
+            st["status"] = "clips_ready"
+            save_state(st)
+
+            # Auto-generate transcript Word doc
+            try:
+                import docx as docx_lib
+                from docx.enum.text import WD_ALIGN_PARAGRAPH
+                from docx.shared import Pt, RGBColor
+
+                def set_rtl_doc(paragraph):
+                    pPr = paragraph._p.get_or_add_pPr()
+                    pPr.append(docx_lib.oxml.OxmlElement("w:bidi"))
+                    for run in paragraph.runs:
+                        rPr = run._r.get_or_add_rPr()
+                        rPr.append(docx_lib.oxml.OxmlElement("w:rtl"))
+
+                doc = docx_lib.Document()
+                style = doc.styles["Normal"]
+                style.font.name = "David"
+                style.font.size = Pt(13)
+
+                title = doc.add_heading(st.get("filename", "תמלול"), level=1)
+                title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                set_rtl_doc(title)
+
+                transcript = st.get("transcript", [])
+                speaker_names = st.get("speaker_names", {})
+                multi_spk = len(set(s.get("speaker", "S1") for s in transcript)) > 1
+                for clip in st.get("text_clips", []):
+                    start_fmt = f"{int(clip['start'] // 60):02d}:{int(clip['start'] % 60):02d}"
+                    end_fmt = f"{int(clip['end'] // 60):02d}:{int(clip['end'] % 60):02d}"
+                    spk = get_clip_speaker(clip, transcript) if multi_spk else None
+                    p = doc.add_paragraph()
+                    header = f"{clip['id']}  ({start_fmt} – {end_fmt})"
+                    if spk:
+                        header += f"  [{speaker_names.get(spk, spk)}]"
+                    run = p.add_run(header)
+                    run.bold = True
+                    run.font.size = Pt(14)
+                    r, g, b = SPK_COLORS_RGB.get(spk, (0x33, 0x99, 0x66)) if spk else (0x33, 0x99, 0x66)
+                    run.font.color.rgb = RGBColor(r, g, b)
+                    set_rtl_doc(p)
+                    tp = doc.add_paragraph(clip.get("text", ""))
+                    set_rtl_doc(tp)
+                    doc.add_paragraph("")
+
+                base = os.path.splitext(st.get("filename", "transcript"))[0]
+                docx_path = os.path.join(pdir("output"), f"{base}.docx")
+                doc.save(docx_path)
+                copy_to_export_folder(docx_path)
+            except Exception:
+                pass  # Word doc generation is best-effort
+
+            progress.update(phase=None, current=len(clips), total=len(clips), message="done")
+        except Exception as e:
+            st = load_state()
+            st["status"] = f"error: {friendly_error(e)}"
             save_state(st)
             progress.update(phase=None, message="")
-            return
-
-        clips = st.get("text_clips", [])
-        progress.update(phase="cut", current=0, total=len(clips), message=f"cutting 0/{len(clips)} clips…")
-
-        cut_files = []
-        for i, clip in enumerate(clips):
-            progress.update(current=i, message=f"cutting {clip['id']}… ({i+1}/{len(clips)})")
-            out_path = os.path.join(pdir("clips"), f"{clip['id']}.wav")
-            duration = clip["end"] - clip["start"]
-            cmd = [
-                "ffmpeg", "-y",
-                "-i", source_path,
-                "-ss", str(clip["start"]),
-                "-t", str(duration),
-                "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1",
-                out_path
-            ]
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            if result.returncode == 0:
-                cut_files.append({
-                    "id": clip["id"],
-                    "path": out_path,
-                    "start": clip["start"],
-                    "end": clip["end"],
-                    "duration": round(duration, 2)
-                })
-
-        st["clips"] = cut_files
-        st["status"] = "clips_ready"
-        save_state(st)
-
-        # Auto-generate transcript Word doc
-        try:
-            import docx as docx_lib
-            from docx.shared import Pt, RGBColor
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-
-            def set_rtl_doc(paragraph):
-                pPr = paragraph._p.get_or_add_pPr()
-                pPr.append(docx_lib.oxml.OxmlElement('w:bidi'))
-                for run in paragraph.runs:
-                    rPr = run._r.get_or_add_rPr()
-                    rPr.append(docx_lib.oxml.OxmlElement('w:rtl'))
-
-            doc = docx_lib.Document()
-            style = doc.styles['Normal']
-            style.font.name = 'David'
-            style.font.size = Pt(13)
-
-            title = doc.add_heading(st.get("filename", "תמלול"), level=1)
-            title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-            set_rtl_doc(title)
-
-            transcript = st.get("transcript", [])
-            speaker_names = st.get("speaker_names", {})
-            multi_spk = len(set(s.get("speaker", "S1") for s in transcript)) > 1
-            for clip in st.get("text_clips", []):
-                start_fmt = f"{int(clip['start']//60):02d}:{int(clip['start']%60):02d}"
-                end_fmt = f"{int(clip['end']//60):02d}:{int(clip['end']%60):02d}"
-                spk = get_clip_speaker(clip, transcript) if multi_spk else None
-                p = doc.add_paragraph()
-                header = f"{clip['id']}  ({start_fmt} – {end_fmt})"
-                if spk:
-                    header += f"  [{speaker_names.get(spk, spk)}]"
-                run = p.add_run(header)
-                run.bold = True
-                run.font.size = Pt(14)
-                r, g, b = SPK_COLORS_RGB.get(spk, (0x33, 0x99, 0x66)) if spk else (0x33, 0x99, 0x66)
-                run.font.color.rgb = RGBColor(r, g, b)
-                set_rtl_doc(p)
-                tp = doc.add_paragraph(clip.get("text", ""))
-                set_rtl_doc(tp)
-                doc.add_paragraph("")
-
-            base = os.path.splitext(st.get("filename", "transcript"))[0]
-            docx_path = os.path.join(pdir("output"), f"{base}.docx")
-            doc.save(docx_path)
-            copy_to_export_folder(docx_path)
-        except Exception:
-            pass  # Word doc generation is best-effort
-
-        progress.update(phase=None, current=len(clips), total=len(clips), message="done")
-      except Exception as e:
-        st = load_state()
-        st["status"] = f"error: {friendly_error(e)}"
-        save_state(st)
-        progress.update(phase=None, message="")
 
     threading.Thread(target=do_cut).start()
     return jsonify({"message": "Cutting started"})
 
+
 @app.route("/export_transcript", methods=["GET"])
 def export_transcript():
     import docx
-    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
-    from docx.oxml.ns import qn
+    from docx.shared import Pt, RGBColor
 
     def set_rtl(paragraph):
         """Set proper RTL on a paragraph (bidi) and all its runs (rtl)."""
         pPr = paragraph._p.get_or_add_pPr()
-        pPr.append(docx.oxml.OxmlElement('w:bidi'))
+        pPr.append(docx.oxml.OxmlElement("w:bidi"))
         for run in paragraph.runs:
             rPr = run._r.get_or_add_rPr()
-            rPr.append(docx.oxml.OxmlElement('w:rtl'))
+            rPr.append(docx.oxml.OxmlElement("w:rtl"))
 
     state = load_state()
     text_clips = state.get("text_clips", [])
@@ -645,8 +711,8 @@ def export_transcript():
     doc = docx.Document()
 
     # Set default font for Hebrew
-    style = doc.styles['Normal']
-    style.font.name = 'David'
+    style = doc.styles["Normal"]
+    style.font.name = "David"
     style.font.size = Pt(13)
 
     title = doc.add_heading(state.get("filename", "תמלול"), level=1)
@@ -658,8 +724,8 @@ def export_transcript():
     multi_spk = len(set(s.get("speaker", "S1") for s in transcript)) > 1
 
     for clip in text_clips:
-        start_fmt = f"{int(clip['start']//60):02d}:{int(clip['start']%60):02d}"
-        end_fmt = f"{int(clip['end']//60):02d}:{int(clip['end']%60):02d}"
+        start_fmt = f"{int(clip['start'] // 60):02d}:{int(clip['start'] % 60):02d}"
+        end_fmt = f"{int(clip['end'] // 60):02d}:{int(clip['end'] % 60):02d}"
         spk = get_clip_speaker(clip, transcript) if multi_spk else None
 
         p = doc.add_paragraph()
@@ -685,7 +751,9 @@ def export_transcript():
     copy_to_export_folder(out_path)
     return send_file(out_path, as_attachment=True, download_name=docx_name)
 
+
 # ─── STEP 4: NARRATION ────────────────────────────────────
+
 
 @app.route("/upload_narration_audio", methods=["POST"])
 def upload_narration_audio():
@@ -700,6 +768,7 @@ def upload_narration_audio():
     save_state(state)
     return jsonify({"ok": True, "filename": f.filename})
 
+
 @app.route("/import_script", methods=["POST"])
 def import_script():
     if "file" not in request.files:
@@ -709,6 +778,7 @@ def import_script():
 
     if filename.endswith(".docx"):
         import docx
+
         tmp = tempfile.mktemp(suffix=".docx")
         f.save(tmp)
         doc = docx.Document(tmp)
@@ -720,6 +790,7 @@ def import_script():
         return jsonify({"error": "Unsupported format. Use .docx or .txt"}), 400
 
     return jsonify({"text": text})
+
 
 @app.route("/process_narration", methods=["POST"])
 def process_narration():
@@ -745,11 +816,11 @@ def process_narration():
             if os.path.getsize(filepath) > 25 * 1024 * 1024:
                 progress.update(phase="narration", current=0, total=3, message="compressing narration…")
                 compressed = filepath.rsplit(".", 1)[0] + "_compressed.mp3"
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", filepath,
-                    "-ac", "1", "-ar", "16000", "-b:a", "64k",
-                    compressed
-                ], capture_output=True, check=True)
+                subprocess.run(
+                    ["ffmpeg", "-y", "-i", filepath, "-ac", "1", "-ar", "16000", "-b:a", "64k", compressed],
+                    capture_output=True,
+                    check=True,
+                )
                 upload_path = compressed
                 progress.update(current=1, message="transcribing narration…")
             else:
@@ -772,7 +843,7 @@ def process_narration():
 
             # Word-level timestamps
             words = []
-            if hasattr(result, 'words') and result.words:
+            if hasattr(result, "words") and result.words:
                 for w in result.words:
                     words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
 
@@ -781,12 +852,14 @@ def process_narration():
 
             st["narration_transcript"] = []
             for i, p in enumerate(passages):
-                st["narration_transcript"].append({
-                    "id": i,
-                    "start": p["start"],
-                    "end": p["end"],
-                    "text": p["text"],
-                })
+                st["narration_transcript"].append(
+                    {
+                        "id": i,
+                        "start": p["start"],
+                        "end": p["end"],
+                        "text": p["text"],
+                    }
+                )
 
             st["narration_words"] = words
             st["narr_text_clips"] = []
@@ -803,6 +876,7 @@ def process_narration():
 
     threading.Thread(target=do_process).start()
     return jsonify({"message": "Processing narration…"})
+
 
 @app.route("/cut_narration", methods=["POST"])
 def cut_narration():
@@ -821,32 +895,44 @@ def cut_narration():
     def do_cut():
         st = load_state()
         clips = st.get("narr_text_clips", [])
-        progress.update(phase="cut_narr", current=0, total=len(clips),
-                        message=f"cutting 0/{len(clips)} narration clips…")
+        progress.update(
+            phase="cut_narr", current=0, total=len(clips), message=f"cutting 0/{len(clips)} narration clips…"
+        )
 
         narration_files = []
         for i, clip in enumerate(clips):
             clip_name = f"{clip['id']}.wav"
             out_path = os.path.join(pdir("narration"), clip_name)
             duration = clip["end"] - clip["start"]
-            progress.update(current=i, message=f"cutting {clip['id']}… ({i+1}/{len(clips)})")
+            progress.update(current=i, message=f"cutting {clip['id']}… ({i + 1}/{len(clips)})")
             cmd = [
-                "ffmpeg", "-y",
-                "-i", source,
-                "-ss", str(clip["start"]),
-                "-t", str(duration),
-                "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1",
-                out_path
+                "ffmpeg",
+                "-y",
+                "-i",
+                source,
+                "-ss",
+                str(clip["start"]),
+                "-t",
+                str(duration),
+                "-c:a",
+                "pcm_s16le",
+                "-ar",
+                "44100",
+                "-ac",
+                "1",
+                out_path,
             ]
             subprocess.run(cmd, capture_output=True, check=True)
-            narration_files.append({
-                "name": clip_name,
-                "path": out_path,
-                "start": clip["start"],
-                "end": clip["end"],
-                "duration": round(duration, 2),
-                "text": clip.get("text", "")
-            })
+            narration_files.append(
+                {
+                    "name": clip_name,
+                    "path": out_path,
+                    "start": clip["start"],
+                    "end": clip["end"],
+                    "duration": round(duration, 2),
+                    "text": clip.get("text", ""),
+                }
+            )
 
         st["narration"] = narration_files
         st["status"] = "narration_cut"
@@ -856,11 +942,14 @@ def cut_narration():
     threading.Thread(target=do_cut).start()
     return jsonify({"message": "Cutting narration…"})
 
+
 # ─── STEP 5: ASSEMBLE ─────────────────────────────────────
+
 
 @app.route("/assemble", methods=["POST"])
 def assemble():
     import datetime as _dt
+
     data = request.json
     assembly_order = data.get("order", [])
     gap_seconds = max(0.0, min(5.0, float(data.get("gap", 1.0))))
@@ -884,6 +973,7 @@ def assemble():
     if not file_paths:
         return jsonify({"error": "No valid files in assembly order"}), 400
 
+    state["assembly"] = assembly_order
     state["status"] = "assembling"
     save_state(state)
 
@@ -896,11 +986,22 @@ def assemble():
             # Generate silence file for gaps between clips
             silence_path = os.path.join(pdir("output"), "_silence.wav")
             if gap_seconds > 0:
-                subprocess.run([
-                    "ffmpeg", "-y", "-f", "lavfi", "-t", str(gap_seconds),
-                    "-i", "anullsrc=r=44100:cl=mono",
-                    "-c:a", "pcm_s16le", silence_path
-                ], capture_output=True)
+                subprocess.run(
+                    [
+                        "ffmpeg",
+                        "-y",
+                        "-f",
+                        "lavfi",
+                        "-t",
+                        str(gap_seconds),
+                        "-i",
+                        "anullsrc=r=44100:cl=mono",
+                        "-c:a",
+                        "pcm_s16le",
+                        silence_path,
+                    ],
+                    capture_output=True,
+                )
 
             final_paths = [file_paths[0]]
             for i in range(1, len(file_paths)):
@@ -913,10 +1014,17 @@ def assemble():
                 cmd += ["-i", p]
             filter_parts = "".join(f"[{i}:a]" for i in range(len(final_paths)))
             cmd += [
-                "-filter_complex", f"{filter_parts}concat=n={len(final_paths)}:v=0:a=1[out]",
-                "-map", "[out]",
-                "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1",
-                output_path
+                "-filter_complex",
+                f"{filter_parts}concat=n={len(final_paths)}:v=0:a=1[out]",
+                "-map",
+                "[out]",
+                "-c:a",
+                "pcm_s16le",
+                "-ar",
+                "44100",
+                "-ac",
+                "1",
+                output_path,
             ]
 
             result = subprocess.run(cmd, capture_output=True, text=True)
@@ -944,11 +1052,27 @@ def assemble():
     return jsonify({"message": "Assembly started"})
 
 
+@app.route("/assembly_order", methods=["GET"])
+def get_assembly_order():
+    state = load_state()
+    return jsonify({"assembly": state.get("assembly", [])})
+
+
+@app.route("/assembly_order", methods=["POST"])
+def save_assembly_order():
+    data = request.json
+    order = data.get("order", [])
+    state = load_state()
+    state["assembly"] = order
+    save_state(state)
+    return jsonify({"ok": True})
+
+
 @app.route("/export_paper_edit", methods=["POST"])
 def export_paper_edit():
     from docx import Document
-    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, RGBColor
 
     data = request.json
     assembly_order = data.get("order", [])
@@ -957,9 +1081,6 @@ def export_paper_edit():
     # Merge text_clips and cut clips so start/end are always available
     clips_map = {c["id"]: c for c in state.get("text_clips", [])}
     clips_map.update({c["id"]: c for c in state.get("clips", [])})
-    narration_map = {n["name"]: n for n in state.get("narration", [])}
-    narr_clips_map = {c["id"]: c for c in state.get("narr_text_clips", [])}
-
     # Build clip_id → text lookup from text_clips (primary) and legacy segment clip_id
     clip_text = {}
     for clip in state.get("text_clips", []):
@@ -980,44 +1101,44 @@ def export_paper_edit():
 
     doc = Document()
     # RTL paragraph direction for Hebrew
-    from docx.oxml.ns import qn
     from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
 
     def set_rtl(para):
         pPr = para._p.get_or_add_pPr()
-        bidi = OxmlElement('w:bidi')
+        bidi = OxmlElement("w:bidi")
         pPr.append(bidi)
         for run in para.runs:
             rPr = run._r.get_or_add_rPr()
-            rtl = OxmlElement('w:rtl')
+            rtl = OxmlElement("w:rtl")
             rPr.append(rtl)
 
     # Set document-wide RTL (bidi) on the default paragraph style
-    from docx.oxml.ns import qn as _qn
-    doc_defaults = doc.styles['Normal']._element
-    pPr_default = doc_defaults.get_or_add_pPr() if hasattr(doc_defaults, 'get_or_add_pPr') else None
-    normal_style = doc.styles['Normal']
-    normal_style.font.name = 'David'
+    doc_defaults = doc.styles["Normal"]._element
+    if hasattr(doc_defaults, "get_or_add_pPr"):
+        doc_defaults.get_or_add_pPr()
+    normal_style = doc.styles["Normal"]
+    normal_style.font.name = "David"
     normal_style.font.size = Pt(12)
     # Apply RTL to the Normal style paragraph properties
     normal_pPr = normal_style._element.get_or_add_pPr()
-    normal_pPr.append(OxmlElement('w:bidi'))
+    normal_pPr.append(OxmlElement("w:bidi"))
 
     # Use a plain paragraph for the title (heading styles override RTL alignment)
     title = doc.add_paragraph()
     title_run = title.add_run(state.get("project_name", "תמלול סופי"))
     title_run.bold = True
     title_run.font.size = Pt(22)
-    title_run.font.name = 'David'
+    title_run.font.name = "David"
     title.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     set_rtl(title)
     # Bottom border under title
-    pBdr = OxmlElement('w:pBdr')
-    bottom = OxmlElement('w:bottom')
-    bottom.set(qn('w:val'), 'single')
-    bottom.set(qn('w:sz'), '6')
-    bottom.set(qn('w:space'), '1')
-    bottom.set(qn('w:color'), '1D9E75')
+    pBdr = OxmlElement("w:pBdr")
+    bottom = OxmlElement("w:bottom")
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "6")
+    bottom.set(qn("w:space"), "1")
+    bottom.set(qn("w:color"), "1D9E75")
     pBdr.append(bottom)
     title._p.get_or_add_pPr().append(pBdr)
 
@@ -1078,6 +1199,7 @@ def export_paper_edit():
 
 # ─── PATH SAFETY ─────────────────────────────────────────
 
+
 def safe_project_path(filepath):
     """Validate that a file path is within the projects/ or demo/ directory."""
     abs_path = os.path.realpath(filepath)
@@ -1086,7 +1208,9 @@ def safe_project_path(filepath):
             return abs_path
     abort(403)
 
+
 # ─── AUDIO ────────────────────────────────────────────────
+
 
 @app.route("/waveform")
 def waveform():
@@ -1102,10 +1226,20 @@ def waveform():
 
     # Extract mono PCM at 100 Hz — manageable even for 2-hour files
     cmd = [
-        "ffmpeg", "-i", filepath,
-        "-ac", "1", "-filter:a", "aresample=100",
-        "-map_metadata", "-1",
-        "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"
+        "ffmpeg",
+        "-i",
+        filepath,
+        "-ac",
+        "1",
+        "-filter:a",
+        "aresample=100",
+        "-map_metadata",
+        "-1",
+        "-f",
+        "s16le",
+        "-acodec",
+        "pcm_s16le",
+        "pipe:1",
     ]
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode != 0 or not result.stdout:
@@ -1123,7 +1257,7 @@ def waveform():
     max_rms = 1.0
     rms_list = []
     for i in range(0, n_samples, chunk):
-        seg = samples[i:i + chunk]
+        seg = samples[i : i + chunk]
         rms = (sum(s * s for s in seg) / len(seg)) ** 0.5
         rms_list.append(rms)
     if rms_list:
@@ -1156,20 +1290,28 @@ def audio_snippet():
 
     # Use ffmpeg to extract snippet as MP3 (small, instant playback)
     cmd = [
-        "ffmpeg", "-y",
-        "-ss", str(padded_start),
-        "-i", filepath,
-        "-t", str(padded_duration),
-        "-c:a", "libmp3lame", "-b:a", "128k",
-        "-f", "mp3",
-        "pipe:1"
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(padded_start),
+        "-i",
+        filepath,
+        "-t",
+        str(padded_duration),
+        "-c:a",
+        "libmp3lame",
+        "-b:a",
+        "128k",
+        "-f",
+        "mp3",
+        "pipe:1",
     ]
     result = subprocess.run(cmd, capture_output=True)
     if result.returncode != 0:
         return "ffmpeg error", 500
 
-    return Response(result.stdout, mimetype="audio/mpeg",
-                    headers={"Cache-Control": "public, max-age=3600"})
+    return Response(result.stdout, mimetype="audio/mpeg", headers={"Cache-Control": "public, max-age=3600"})
+
 
 @app.route("/audio/<path:filepath>")
 def stream_audio(filepath):
@@ -1179,14 +1321,17 @@ def stream_audio(filepath):
         return "Not found", 404
     return send_file(filepath, mimetype="audio/wav", conditional=True)
 
+
 @app.route("/download/<path:filename>")
 def download(filename):
     filepath = safe_project_path(os.path.join(pdir("output"), filename))
     return send_file(filepath, as_attachment=True)
 
+
 @app.route("/export_clips_zip")
 def export_clips_zip():
-    import zipfile, io
+    import zipfile
+
     state = load_state()
     clips = state.get("clips", [])
     if not clips:
@@ -1200,8 +1345,10 @@ def export_clips_zip():
     buf.seek(0)
     base = os.path.splitext(state.get("filename", "clips"))[0]
     zip_name = f"{base}_clips.zip"
-    return Response(buf.read(), mimetype="application/zip",
-                    headers={"Content-Disposition": f'attachment; filename="{zip_name}"'})
+    return Response(
+        buf.read(), mimetype="application/zip", headers={"Content-Disposition": f'attachment; filename="{zip_name}"'}
+    )
+
 
 @app.route("/download_output")
 def download_output():
@@ -1212,6 +1359,7 @@ def download_output():
     if not output_file or not os.path.exists(output_file):
         return jsonify({"error": "No output file found"}), 404
     return send_file(output_file, as_attachment=True, download_name=output_name)
+
 
 @app.route("/set_phase", methods=["POST"])
 def set_phase():
@@ -1224,17 +1372,20 @@ def set_phase():
     save_state(state)
     return jsonify({"ok": True, "phase": phase})
 
+
 # ─── PROJECTS ────────────────────────────────────────────
+
 
 @app.route("/save_project", methods=["POST"])
 def save_project():
     import re
+
     data = request.json or {}
     name = data.get("name", "").strip()
     if not name:
         return jsonify({"error": "Project name is required"}), 400
 
-    safe_name = re.sub(r'[^a-zA-Z0-9\u0590-\u05FF \-_]', '', name).strip()
+    safe_name = re.sub(r"[^a-zA-Z0-9\u0590-\u05FF \-_]", "", name).strip()
     if not safe_name:
         return jsonify({"error": "Invalid project name"}), 400
 
@@ -1285,11 +1436,13 @@ def list_projects():
                 try:
                     with open(state_path) as f:
                         s = json.load(f)
-                    projects.append({
-                        "name": entry,
-                        "interviewee": s.get("interviewee", ""),
-                        "recording_date": s.get("recording_date", ""),
-                    })
+                    projects.append(
+                        {
+                            "name": entry,
+                            "interviewee": s.get("interviewee", ""),
+                            "recording_date": s.get("recording_date", ""),
+                        }
+                    )
                 except Exception:
                     projects.append({"name": entry, "interviewee": "", "recording_date": ""})
     return jsonify({"projects": projects})
@@ -1303,12 +1456,13 @@ def _migrate_paths(state, project_dir):
         "narration/": os.path.join(project_dir, "narration") + os.sep,
         "output/": os.path.join(project_dir, "output") + os.sep,
     }
+
     def fix(path):
         if not path:
             return path
         for old_prefix, new_prefix in prefix_map.items():
             if path.startswith(old_prefix):
-                return new_prefix + path[len(old_prefix):]
+                return new_prefix + path[len(old_prefix) :]
         return path
 
     state["source_file"] = fix(state.get("source_file"))
@@ -1363,15 +1517,19 @@ def get_export_folder():
     cfg = load_config()
     return jsonify({"export_folder": cfg.get("export_folder", "")})
 
+
 @app.route("/export_folder/browse", methods=["POST"])
 def browse_export_folder():
     """Open native folder picker (macOS, Windows, or Linux) and return the selected path."""
     import sys
+
     try:
         if sys.platform == "darwin":
             result = subprocess.run(
                 ["osascript", "-e", 'POSIX path of (choose folder with prompt "Choose export folder")'],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             folder = result.stdout.strip().rstrip("/")
             if result.returncode != 0 or not folder:
@@ -1379,11 +1537,16 @@ def browse_export_folder():
             return jsonify({"folder": folder})
         elif sys.platform == "win32":
             result = subprocess.run(
-                ["powershell", "-Command",
-                 "Add-Type -AssemblyName System.Windows.Forms; "
-                 "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
-                 "if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath } else { '' }"],
-                capture_output=True, text=True, timeout=120,
+                [
+                    "powershell",
+                    "-Command",
+                    "Add-Type -AssemblyName System.Windows.Forms; "
+                    "$f = New-Object System.Windows.Forms.FolderBrowserDialog; "
+                    "if ($f.ShowDialog() -eq 'OK') { $f.SelectedPath } else { '' }",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             folder = result.stdout.strip()
             if not folder:
@@ -1393,7 +1556,9 @@ def browse_export_folder():
             # Linux — try zenity
             result = subprocess.run(
                 ["zenity", "--file-selection", "--directory", "--title=Choose export folder"],
-                capture_output=True, text=True, timeout=120,
+                capture_output=True,
+                text=True,
+                timeout=120,
             )
             folder = result.stdout.strip()
             if result.returncode != 0 or not folder:
@@ -1401,6 +1566,7 @@ def browse_export_folder():
             return jsonify({"folder": folder})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
 
 @app.route("/export_folder", methods=["POST"])
 def set_export_folder():
@@ -1414,6 +1580,7 @@ def set_export_folder():
     cfg["export_folder"] = folder
     save_config(cfg)
     return jsonify({"ok": True, "export_folder": folder})
+
 
 @app.route("/update_metadata", methods=["POST"])
 def update_metadata():
@@ -1429,7 +1596,7 @@ def update_metadata():
 @app.route("/rename_speaker", methods=["POST"])
 def rename_speaker():
     data = request.json or {}
-    speaker_id = data.get("speaker_id", "").strip()   # e.g. "S1"
+    speaker_id = data.get("speaker_id", "").strip()  # e.g. "S1"
     display_name = data.get("display_name", "").strip()  # e.g. "Interviewer"
     if not speaker_id or not display_name:
         return jsonify({"error": "speaker_id and display_name required"}), 400
@@ -1531,7 +1698,9 @@ def load_demo():
             try:
                 dur_result = subprocess.run(
                     ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", dest],
-                    capture_output=True, text=True)
+                    capture_output=True,
+                    text=True,
+                )
                 progress["audio_duration"] = float(dur_result.stdout.strip())
             except Exception:
                 progress["audio_duration"] = 0
@@ -1549,7 +1718,7 @@ def load_demo():
                 result = client.audio.transcriptions.create(**whisper_kwargs)
 
             words = []
-            if hasattr(result, 'words') and result.words:
+            if hasattr(result, "words") and result.words:
                 for w in result.words:
                     words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
 
@@ -1558,13 +1727,15 @@ def load_demo():
 
             segments = []
             for i, p in enumerate(passages):
-                segments.append({
-                    "id": i,
-                    "start": p["start"],
-                    "end": p["end"],
-                    "text": p["text"],
-                    "speaker": "S1",
-                })
+                segments.append(
+                    {
+                        "id": i,
+                        "start": p["start"],
+                        "end": p["end"],
+                        "text": p["text"],
+                        "speaker": "S1",
+                    }
+                )
 
             progress.update(current=progress["total"] - 1, message="processing segments…")
 
@@ -1604,10 +1775,13 @@ def load_demo():
 @app.route("/setup/status")
 def setup_status():
     """Check which API keys are configured."""
-    return jsonify({
-        "openai": bool(os.environ.get("OPENAI_API_KEY")),
-        "huggingface": bool(os.environ.get("HUGGINGFACE_TOKEN")),
-    })
+    return jsonify(
+        {
+            "openai": bool(os.environ.get("OPENAI_API_KEY")),
+            "huggingface": bool(os.environ.get("HUGGINGFACE_TOKEN")),
+        }
+    )
+
 
 @app.route("/setup/save_keys", methods=["POST"])
 def setup_save_keys():
@@ -1669,6 +1843,7 @@ def reset():
     if os.path.exists("state.json"):
         os.rename("state.json", "state.json.migrated")
     return jsonify({"ok": True})
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5555)

@@ -15,18 +15,22 @@ cd FieldCut
 ### 2. Set Up Your Environment
 
 ```bash
-# Create a virtual environment
+# Quick setup (creates venv, installs all deps including dev tools):
+make setup
+
+# Or manually:
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
 pip install -r requirements.txt
-pip install pytest  # for running tests
+pip install -r requirements-dev.txt
 
 # Install ffmpeg (required for audio processing)
 # macOS:   brew install ffmpeg
 # Ubuntu:  sudo apt install ffmpeg
 # Windows: https://ffmpeg.org/download.html
+
+# Optional: install pre-commit hooks (auto-formats on commit)
+pre-commit install
 ```
 
 ### 3. Configure API Keys (optional for most development)
@@ -41,7 +45,8 @@ cp .env.example .env
 ### 4. Run the App
 
 ```bash
-python app.py
+make run
+# Or: python app.py
 # Open http://localhost:5555
 ```
 
@@ -49,7 +54,7 @@ python app.py
 
 ```bash
 # Run all tests
-pytest tests/ -v
+make test
 
 # Run a specific test file
 pytest tests/test_routes.py -v
@@ -59,6 +64,20 @@ pytest tests/test_helpers.py::TestMergeSegments::test_single_segment_unchanged -
 ```
 
 Tests don't require API keys — external services are mocked or skipped. You do need `ffmpeg` installed for the pipeline tests.
+
+## Linting & Formatting
+
+We use [ruff](https://docs.astral.sh/ruff/) for linting and formatting:
+
+```bash
+# Check for lint errors and formatting issues
+make lint
+
+# Auto-fix formatting and lint issues
+make format
+```
+
+If you installed the pre-commit hooks (`pre-commit install`), formatting is applied automatically on every commit.
 
 ## Making Changes
 
@@ -87,7 +106,7 @@ test: add tests for assembly gap calculation
 
 ### Code Style
 
-- **Backend:** Python, follow existing patterns in `app.py`
+- **Backend:** Python, follow existing patterns. Run `make lint` before pushing — CI enforces it
 - **Frontend:** Vanilla JS in `templates/index.html` and `static/lang.js` — no frameworks, no build step
 - **Keep it simple** — this is a tool for journalists, not a tech demo
 - **Error handling:** Use `friendly_error()` for user-facing errors, always provide a helpful message

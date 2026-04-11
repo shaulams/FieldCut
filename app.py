@@ -109,6 +109,7 @@ except ImportError:
 from openai import OpenAI
 
 app = Flask(__name__)
+app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2 GB upload limit
 
 # ─── APP CONFIG ──────────────────────────────────────────
 _config_path = "config.json"
@@ -311,9 +312,13 @@ def transcribe():
             if os.path.getsize(filepath) > 25 * 1024 * 1024:
                 progress.update(phase="transcribe", current=0, total=3, message="compressing audio…")
                 compressed = filepath.rsplit(".", 1)[0] + "_compressed.mp3"
+                # Calculate bitrate to keep output under 24 MB regardless of duration
+                duration = progress["audio_duration"] or 1
+                target_bits = 24 * 1024 * 1024 * 8
+                bitrate_kbps = max(8, min(64, int(target_bits / duration / 1000)))
                 subprocess.run([
                     "ffmpeg", "-y", "-i", filepath,
-                    "-ac", "1", "-ar", "16000", "-b:a", "64k",
+                    "-ac", "1", "-ar", "16000", "-b:a", f"{bitrate_kbps}k",
                     compressed
                 ], capture_output=True, check=True)
                 upload_path = compressed
@@ -745,9 +750,18 @@ def process_narration():
             if os.path.getsize(filepath) > 25 * 1024 * 1024:
                 progress.update(phase="narration", current=0, total=3, message="compressing narration…")
                 compressed = filepath.rsplit(".", 1)[0] + "_compressed.mp3"
+                try:
+                    dur_result = subprocess.run(
+                        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filepath],
+                        capture_output=True, text=True)
+                    narr_duration = float(dur_result.stdout.strip()) or 1
+                except Exception:
+                    narr_duration = 1
+                target_bits = 24 * 1024 * 1024 * 8
+                bitrate_kbps = max(8, min(64, int(target_bits / narr_duration / 1000)))
                 subprocess.run([
                     "ffmpeg", "-y", "-i", filepath,
-                    "-ac", "1", "-ar", "16000", "-b:a", "64k",
+                    "-ac", "1", "-ar", "16000", "-b:a", f"{bitrate_kbps}k",
                     compressed
                 ], capture_output=True, check=True)
                 upload_path = compressed

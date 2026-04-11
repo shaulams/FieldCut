@@ -453,6 +453,7 @@ def transcribe():
             source_files_info = []
             cumulative_offset = 0.0
             global_seg_id = 0
+            speaker_offset = 0
 
             for idx in range(total_files):
                 filename, filepath = saved_files[idx]
@@ -476,12 +477,24 @@ def transcribe():
                     "duration": duration,
                 })
 
-                # Shift timestamps and add source_index
+                # Build speaker ID mapping: offset speakers so each file gets unique IDs
+                file_speakers = set()
+                for seg in segments:
+                    file_speakers.add(seg.get("speaker", "S1"))
+                # Sort to get deterministic mapping
+                file_speakers = sorted(file_speakers, key=lambda s: int(s[1:]) if s[1:].isdigit() else 0)
+                speaker_map = {}
+                for spk in file_speakers:
+                    old_num = int(spk[1:]) if spk[1:].isdigit() else 1
+                    speaker_map[spk] = f"S{old_num + speaker_offset}"
+
+                # Shift timestamps, remap speakers, and add source_index
                 for seg in segments:
                     seg["id"] = global_seg_id
                     seg["start"] += cumulative_offset
                     seg["end"] += cumulative_offset
                     seg["source_index"] = idx
+                    seg["speaker"] = speaker_map.get(seg.get("speaker", "S1"), seg.get("speaker", "S1"))
                     merged_segments.append(seg)
                     global_seg_id += 1
 
@@ -491,6 +504,7 @@ def transcribe():
                     w["source_index"] = idx
                     merged_words.append(w)
 
+                speaker_offset += len(file_speakers)
                 cumulative_offset += duration
 
             # Build speaker_names from merged segments

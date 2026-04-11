@@ -90,6 +90,22 @@
   .pane-label { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--text2); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; text-wrap: balance; }
   .pane-label .label-count { color: var(--text2); }
 
+  /* FILE DIVIDER */
+  .file-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    color: var(--text2);
+    font-size: 11px;
+    font-family: var(--mono);
+  }
+  .file-divider::before, .file-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--border);
+  }
+
   /* WORD-LEVEL TRANSCRIPT */
   .paragraph { margin-bottom: 16px; line-height: 1.85; position: relative; font-size: 15px; }
   .para-ts { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-left: 8px; cursor: pointer; user-select: none; font-variant-numeric: tabular-nums; }
@@ -828,12 +844,16 @@ function renderTranscript() {
     renderSpeakerLegend();
     const names0 = state.speaker_names || {};
     const multi0 = new Set(segments.map(s => s.speaker || 'S1')).size > 1;
-    container.innerHTML = segments.map(seg => {
+    container.innerHTML = segments.map((seg, i) => {
       const spk = seg.speaker || 'S1';
       const badge = (multi0 || spk !== 'S1')
         ? `<span class="spk-badge spk-${spk}" onclick="renameSpeaker('${spk}')" title="Click to rename">${names0[spk] || spk}</span>`
         : '';
-      return `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span>${badge} ${seg.text}</div>`;
+      const prevSrcIdx = i > 0 ? segments[i - 1].source_index : undefined;
+      const divider = (seg.source_index !== undefined && prevSrcIdx !== undefined && seg.source_index !== prevSrcIdx && state.source_files)
+        ? `<div class="file-divider"><span>${state.source_files[seg.source_index]?.filename || ''}</span></div>`
+        : '';
+      return divider + `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span>${badge} ${seg.text}</div>`;
     }).join('');
     return;
   }
@@ -844,7 +864,19 @@ function renderTranscript() {
   const names = state.speaker_names || {};
   const multiSpeaker = new Set(segments.map(s => s.speaker || 'S1')).size > 1;
 
+  let prevSourceIndex = undefined;
   segments.forEach(seg => {
+    // Insert file divider when source_index changes between consecutive segments
+    if (seg.source_index !== undefined && prevSourceIndex !== undefined && seg.source_index !== prevSourceIndex && state.source_files) {
+      const divider = document.createElement('div');
+      divider.className = 'file-divider';
+      const label = document.createElement('span');
+      label.textContent = state.source_files[seg.source_index]?.filename || '';
+      divider.appendChild(label);
+      container.appendChild(divider);
+    }
+    prevSourceIndex = seg.source_index;
+
     const para = document.createElement('div');
     para.className = 'paragraph';
 

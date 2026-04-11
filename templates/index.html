@@ -90,6 +90,22 @@
   .pane-label { font-family: var(--sans); font-size: 14px; font-weight: 600; color: var(--text2); margin-bottom: 12px; display: flex; align-items: center; gap: 8px; text-wrap: balance; }
   .pane-label .label-count { color: var(--text2); }
 
+  /* FILE DIVIDER */
+  .file-divider {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 16px 0;
+    color: var(--text2);
+    font-size: 11px;
+    font-family: var(--mono);
+  }
+  .file-divider::before, .file-divider::after {
+    content: '';
+    flex: 1;
+    border-top: 1px solid var(--border);
+  }
+
   /* WORD-LEVEL TRANSCRIPT */
   .paragraph { margin-bottom: 16px; line-height: 1.85; position: relative; font-size: 15px; }
   .para-ts { font-family: var(--mono); font-size: 11px; color: var(--text3); margin-left: 8px; cursor: pointer; user-select: none; font-variant-numeric: tabular-nums; }
@@ -453,7 +469,7 @@
             <button class="btn" onclick="loadDemo()" style="width:auto;padding:6px 16px;font-size:12px;opacity:0.7" data-i18n="try_demo"></button>
           </div>
         </div>
-        <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
+        <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" multiple onchange="uploadAndTranscribe(event)">
         <div id="speaker-legend"></div>
         <div class="search-bar" id="search-bar">
           <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" aria-label="Search transcript" oninput="doSearch()" onkeydown="searchKeydown(event)">
@@ -736,7 +752,11 @@ function renderAll() {
   renderPhaseButtons();
   updatePhaseBar(state.phase || 1);
   if (state.source_file && state.transcript && state.transcript.length) {
-    loadWaveform(state.source_file);
+    if (state.source_files && state.source_files.length > 1) {
+      loadWaveformMulti();
+    } else {
+      loadWaveform(state.source_file);
+    }
   }
   // Restore narration upload state
   if (state.narration_filename && !(state.narration_words && state.narration_words.length)) {
@@ -771,15 +791,18 @@ async function loadDemo() {
 }
 
 async function uploadAndTranscribe(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+  const files = Array.from(event.target.files);
+  if (!files.length) return;
   document.getElementById('upload-zone').style.display = 'none';
-  document.getElementById('file-info').textContent = file.name;
+  document.getElementById('file-info').textContent =
+    files.length === 1 ? files[0].name : `${files.length} files selected`;
   setStatus('working', t('transcribing'));
   const whisperLang = document.getElementById('whisper-lang').value;
   const diarize = document.getElementById('diarize-toggle').checked;
   const formData = new FormData();
-  formData.append('file', file);
+  for (const file of files) {
+    formData.append('file', file);
+  }
   formData.append('language', whisperLang);
   if (diarize) formData.append('diarize', '1');
   const res = await fetch('/transcribe', { method: 'POST', body: formData });
@@ -825,12 +848,16 @@ function renderTranscript() {
     renderSpeakerLegend();
     const names0 = state.speaker_names || {};
     const multi0 = new Set(segments.map(s => s.speaker || 'S1')).size > 1;
-    container.innerHTML = segments.map(seg => {
+    container.innerHTML = segments.map((seg, i) => {
       const spk = seg.speaker || 'S1';
       const badge = (multi0 || spk !== 'S1')
         ? `<span class="spk-badge spk-${spk}" onclick="renameSpeaker('${spk}')" title="Click to rename">${names0[spk] || spk}</span>`
         : '';
-      return `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span>${badge} ${seg.text}</div>`;
+      const prevSrcIdx = i > 0 ? segments[i - 1].source_index : undefined;
+      const divider = (seg.source_index !== undefined && prevSrcIdx !== undefined && seg.source_index !== prevSrcIdx && state.source_files)
+        ? `<div class="file-divider"><span>${state.source_files[seg.source_index]?.filename || ''}</span></div>`
+        : '';
+      return divider + `<div class="paragraph"><span class="para-ts" onclick="playSnippet('${state.source_file}',${seg.start},${seg.end})">${formatTime(seg.start)}</span>${badge} ${seg.text}</div>`;
     }).join('');
     return;
   }
@@ -841,7 +868,19 @@ function renderTranscript() {
   const names = state.speaker_names || {};
   const multiSpeaker = new Set(segments.map(s => s.speaker || 'S1')).size > 1;
 
+  let prevSourceIndex = undefined;
   segments.forEach(seg => {
+    // Insert file divider when source_index changes between consecutive segments
+    if (seg.source_index !== undefined && prevSourceIndex !== undefined && seg.source_index !== prevSourceIndex && state.source_files) {
+      const divider = document.createElement('div');
+      divider.className = 'file-divider';
+      const label = document.createElement('span');
+      label.textContent = state.source_files[seg.source_index]?.filename || '';
+      divider.appendChild(label);
+      container.appendChild(divider);
+    }
+    prevSourceIndex = seg.source_index;
+
     const para = document.createElement('div');
     para.className = 'paragraph';
 
@@ -1107,7 +1146,8 @@ function playSnippet(file, start, end) {
   if (!file) return;
   snippetAudio.src = `/audio_snippet?file=${encodeURIComponent(file)}&start=${start}&end=${end}`;
   snippetAudio.play().catch(() => {});
-  if (waveformData && (file === state.source_file || file === waveformSourceFile)) {
+  const isMultiFile = waveformSourceFile === '__multi__' && state.source_files && state.source_files.some(sf => sf.path === file);
+  if (waveformData && (file === state.source_file || file === waveformSourceFile || isMultiFile)) {
     waveformPlayStart = start;
     startPlayheadAnimation();
   }
@@ -1262,6 +1302,23 @@ async function loadWaveform(sourceFile) {
   waveformData = data.points;
   waveformDuration = data.duration;
   waveformSourceFile = sourceFile;
+  waveformZoom = 1;
+  waveformOffset = 0;
+  computeSilences();
+  document.getElementById('waveform-bar').classList.add('visible');
+  drawWaveform();
+}
+
+async function loadWaveformMulti() {
+  const key = '__multi__';
+  if (waveformSourceFile === key && waveformData) { drawWaveform(); return; }
+  const res = await fetch('/waveform_multi');
+  if (!res.ok) return;
+  const data = await res.json();
+  if (data.error || !data.points) return;
+  waveformData = data.points;
+  waveformDuration = data.duration;
+  waveformSourceFile = key;
   waveformZoom = 1;
   waveformOffset = 0;
   computeSilences();
@@ -1443,12 +1500,24 @@ function startPlayheadAnimation() {
 }
 
 function waveformMouseDown(e) {
-  if (!waveformDuration || !state.source_file) return;
+  if (!waveformDuration) return;
   const rect = e.currentTarget.getBoundingClientRect();
   const t = xToT(e.clientX - rect.left, rect.width);
   waveformPlayhead = t;
   drawWaveform();
-  playSnippet(state.source_file, t, Math.min(waveformDuration, t + 30));
+  // Resolve correct source file for multi-file projects
+  let playFile = state.source_file;
+  let playStart = t;
+  if (state.source_files && state.source_files.length > 1) {
+    for (const sf of state.source_files) {
+      if (t >= sf.offset && t < sf.offset + sf.duration) {
+        playFile = sf.path;
+        playStart = t - sf.offset;
+        break;
+      }
+    }
+  }
+  playSnippet(playFile, playStart, playStart + 30);
   scrollTranscriptToTime(t);
 }
 

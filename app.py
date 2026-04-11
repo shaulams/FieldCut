@@ -1,4 +1,4 @@
-import os, json, subprocess, tempfile, threading, time, io, shutil, struct
+import os, json, subprocess, tempfile, threading, time, io, shutil, struct, concurrent.futures
 from pathlib import Path
 from flask import Flask, render_template, request, jsonify, send_file, Response, abort
 
@@ -98,6 +98,26 @@ def get_clip_speaker(clip, transcript):
             best_overlap = overlap
             best = seg.get("speaker", "S1")
     return best
+
+def resolve_source_for_clip(clip, state):
+    """Given a clip with start/end times, find the correct source file and real timestamps."""
+    source_files = state.get("source_files", [])
+    if not source_files:
+        # Legacy single-file project
+        sf = state.get("source_file", "")
+        return sf, clip["start"], clip["end"]
+
+    # Find which source file this clip belongs to by checking timestamp range
+    for i, sf in enumerate(source_files):
+        offset = sf["offset"]
+        end_time = offset + sf["duration"]
+        if clip["start"] >= offset and clip["start"] < end_time:
+            real_start = clip["start"] - offset
+            real_end = clip["end"] - offset
+            return sf["path"], real_start, real_end
+    # Fallback to last file
+    sf = source_files[-1]
+    return sf["path"], clip["start"] - sf["offset"], clip["end"] - sf["offset"]
 
 # Load .env file if present (so OPENAI_API_KEY persists across sessions)
 try:
@@ -219,6 +239,21 @@ def load_state():
     if os.path.exists(sf):
         with open(sf) as f:
             state = json.load(f)
+        # Backward compat: populate source_files from legacy source_file
+        if state.get("source_file") and not state.get("source_files"):
+            path = state["source_file"]
+            if os.path.exists(path):
+                try:
+                    dur_result = subprocess.run(
+                        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                        capture_output=True, text=True)
+                    duration = float(dur_result.stdout.strip())
+                except Exception:
+                    duration = 0
+                state["source_files"] = [{
+                    "filename": state.get("filename", os.path.basename(path)),
+                    "path": path, "offset": 0, "duration": duration
+                }]
         # Auto-detect phase for legacy projects that predate the phase system
         if "phase" not in state:
             status = state.get("status", "")
@@ -231,7 +266,7 @@ def load_state():
         return state
     return {"transcript": [], "words": [], "clips": [], "text_clips": [],
             "narration_transcript": [], "narration_words": [], "narr_text_clips": [],
-            "narration": [], "assembly": [], "source_file": None, "phase": 1}
+            "narration": [], "assembly": [], "source_file": None, "source_files": [], "phase": 1}
 
 def save_state(state):
     with open(state_file(), "w") as f:
@@ -276,6 +311,79 @@ def get_state():
 
 # ─── STEP 1: TRANSCRIBE ───────────────────────────────────
 
+def transcribe_single_file(filepath, whisper_lang, diarize, file_index, total_files):
+    """Transcribe a single audio file and return (segments, words, duration).
+
+    Updates the global ``progress`` dict with per-file status messages.
+    Raises on failure so the caller can handle partial errors.
+    """
+    prefix = f"file {file_index + 1}/{total_files}: " if total_files > 1 else ""
+
+    # ── Get audio duration via ffprobe ──
+    duration = 0
+    try:
+        dur_result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filepath],
+            capture_output=True, text=True)
+        duration = float(dur_result.stdout.strip())
+    except Exception:
+        pass
+
+    # ── Compress if file > 25 MB ──
+    upload_path = filepath
+    if os.path.getsize(filepath) > 25 * 1024 * 1024:
+        progress.update(message=f"{prefix}compressing audio…")
+        compressed = filepath.rsplit(".", 1)[0] + "_compressed.mp3"
+        target_bits = 24 * 1024 * 1024 * 8
+        bitrate_kbps = max(8, min(64, int(target_bits / (duration or 1) / 1000)))
+        subprocess.run([
+            "ffmpeg", "-y", "-i", filepath,
+            "-ac", "1", "-ar", "16000", "-b:a", f"{bitrate_kbps}k",
+            compressed
+        ], capture_output=True, check=True)
+        upload_path = compressed
+
+    # ── Send to Whisper API ──
+    progress.update(message=f"{prefix}sending to Whisper…")
+    whisper_kwargs = {
+        "model": "whisper-1",
+        "response_format": "verbose_json",
+        "timestamp_granularities": ["word", "segment"],
+    }
+    if whisper_lang:
+        whisper_kwargs["language"] = whisper_lang
+
+    with open(upload_path, "rb") as audio_file:
+        whisper_kwargs["file"] = audio_file
+        result = client.audio.transcriptions.create(**whisper_kwargs)
+
+    # ── Extract words ──
+    words = []
+    if hasattr(result, 'words') and result.words:
+        for w in result.words:
+            words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
+
+    # ── Extract and merge segments ──
+    raw = [{"start": seg.start, "end": seg.end, "text": seg.text.strip()} for seg in result.segments]
+    passages = merge_segments(raw)
+    segments = []
+    for i, p in enumerate(passages):
+        segments.append({
+            "id": i,
+            "start": p["start"],
+            "end": p["end"],
+            "text": p["text"],
+            "speaker": "S1",
+        })
+
+    # ── Diarization (optional) ──
+    if diarize and os.environ.get("HUGGINGFACE_TOKEN"):
+        progress.update(message=f"{prefix}detecting speakers…")
+        segments = assign_speakers(segments, filepath)
+
+    return segments, words, duration
+
+
 @app.route("/transcribe", methods=["POST"])
 def transcribe():
     if not client:
@@ -283,104 +391,143 @@ def transcribe():
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded"}), 400
 
-    f = request.files["file"]
-    filename = f.filename
-    filepath = os.path.join(pdir("uploads"), filename)
-    f.save(filepath)
+    files = request.files.getlist("file")
     whisper_lang = request.form.get("language", "he")
     diarize = request.form.get("diarize") == "1"
     if whisper_lang == "auto":
         whisper_lang = None
 
+    # Save all uploaded files to the uploads directory
+    saved_files = []  # list of (filename, filepath)
+    for f in files:
+        filepath = os.path.join(pdir("uploads"), f.filename)
+        f.save(filepath)
+        saved_files.append((f.filename, filepath))
+
     def do_transcribe():
         state = load_state()
-        state["source_file"] = filepath
         state["status"] = "transcribing"
+        state["source_file"] = saved_files[0][1]  # backward compat
         save_state(state)
 
-        try:
-            # Get audio duration for time estimates
+        total_files = len(saved_files)
+        progress.update(phase="transcribe", current=0, total=total_files + 1,
+                        message="starting transcription…")
+
+        # Transcribe files in parallel
+        results = [None] * total_files  # indexed by position
+        errors = [None] * total_files
+        warnings = []
+
+        def _transcribe_one(idx):
+            filename, filepath = saved_files[idx]
             try:
-                dur_result = subprocess.run(
-                    ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", filepath],
-                    capture_output=True, text=True)
-                progress["audio_duration"] = float(dur_result.stdout.strip())
-            except Exception:
-                progress["audio_duration"] = 0
+                return idx, transcribe_single_file(filepath, whisper_lang, diarize, idx, total_files)
+            except Exception as e:
+                return idx, e
 
-            upload_path = filepath
-            if os.path.getsize(filepath) > 25 * 1024 * 1024:
-                progress.update(phase="transcribe", current=0, total=3, message="compressing audio…")
-                compressed = filepath.rsplit(".", 1)[0] + "_compressed.mp3"
-                # Calculate bitrate to keep output under 24 MB regardless of duration
-                duration = progress["audio_duration"] or 1
-                target_bits = 24 * 1024 * 1024 * 8
-                bitrate_kbps = max(8, min(64, int(target_bits / duration / 1000)))
-                subprocess.run([
-                    "ffmpeg", "-y", "-i", filepath,
-                    "-ac", "1", "-ar", "16000", "-b:a", f"{bitrate_kbps}k",
-                    compressed
-                ], capture_output=True, check=True)
-                upload_path = compressed
-                progress.update(current=1, message="sending to Whisper…")
-            else:
-                progress.update(phase="transcribe", current=0, total=2, message="sending to Whisper…")
+        max_workers = min(total_files, 4)
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [executor.submit(_transcribe_one, i) for i in range(total_files)]
+                for future in concurrent.futures.as_completed(futures):
+                    idx, result = future.result()
+                    if isinstance(result, Exception):
+                        errors[idx] = result
+                        warnings.append(f"{saved_files[idx][0]}: {friendly_error(result)}")
+                    else:
+                        results[idx] = result  # (segments, words, duration)
+                    # Update progress count
+                    done_count = sum(1 for r in results if r is not None) + sum(1 for e in errors if e is not None)
+                    progress.update(current=done_count, message=f"transcribed {done_count}/{total_files} files…")
 
-            whisper_kwargs = {
-                "model": "whisper-1",
-                "response_format": "verbose_json",
-                "timestamp_granularities": ["word", "segment"],
-            }
-            if whisper_lang:
-                whisper_kwargs["language"] = whisper_lang
+            # Check if ALL files failed
+            if all(r is None for r in results):
+                err_msg = "; ".join(warnings) if warnings else "all files failed"
+                raise Exception(err_msg)
 
-            with open(upload_path, "rb") as audio_file:
-                whisper_kwargs["file"] = audio_file
-                result = client.audio.transcriptions.create(**whisper_kwargs)
+            # ── Merge results with cumulative time offsets ──
+            progress.update(message="merging transcripts…")
+            merged_segments = []
+            merged_words = []
+            source_files_info = []
+            cumulative_offset = 0.0
+            global_seg_id = 0
+            speaker_offset = 0
 
-            # Store word-level timestamps
-            words = []
-            if hasattr(result, 'words') and result.words:
-                for w in result.words:
-                    words.append({"word": w.word.strip(), "start": w.start, "end": w.end})
+            for idx in range(total_files):
+                filename, filepath = saved_files[idx]
+                if results[idx] is None:
+                    # This file failed — skip it but record in source_files
+                    source_files_info.append({
+                        "filename": filename,
+                        "path": filepath,
+                        "offset": cumulative_offset,
+                        "duration": 0,
+                        "error": friendly_error(errors[idx]) if errors[idx] else "unknown error",
+                    })
+                    continue
 
-            # Store segment-level (merged into passages) for paragraph grouping
-            raw = [{"start": seg.start, "end": seg.end, "text": seg.text.strip()} for seg in result.segments]
-            passages = merge_segments(raw)
+                segments, words, duration = results[idx]
 
-            segments = []
-            for i, p in enumerate(passages):
-                segments.append({
-                    "id": i,
-                    "start": p["start"],
-                    "end": p["end"],
-                    "text": p["text"],
-                    "speaker": "S1",
+                source_files_info.append({
+                    "filename": filename,
+                    "path": filepath,
+                    "offset": cumulative_offset,
+                    "duration": duration,
                 })
 
-            progress.update(current=progress["total"] - 1, message="processing segments…")
+                # Build speaker ID mapping: offset speakers so each file gets unique IDs
+                file_speakers = set()
+                for seg in segments:
+                    file_speakers.add(seg.get("speaker", "S1"))
+                # Sort to get deterministic mapping
+                file_speakers = sorted(file_speakers, key=lambda s: int(s[1:]) if s[1:].isdigit() else 0)
+                speaker_map = {}
+                for spk in file_speakers:
+                    old_num = int(spk[1:]) if spk[1:].isdigit() else 1
+                    speaker_map[spk] = f"S{old_num + speaker_offset}"
 
-            # Diarization (optional — only if user opted in and HUGGINGFACE_TOKEN is set)
-            if diarize and os.environ.get("HUGGINGFACE_TOKEN"):
-                progress.update(message="detecting speakers…")
-                segments = assign_speakers(segments, filepath)
+                # Shift timestamps, remap speakers, and add source_index
+                for seg in segments:
+                    seg["id"] = global_seg_id
+                    seg["start"] += cumulative_offset
+                    seg["end"] += cumulative_offset
+                    seg["source_index"] = idx
+                    seg["speaker"] = speaker_map.get(seg.get("speaker", "S1"), seg.get("speaker", "S1"))
+                    merged_segments.append(seg)
+                    global_seg_id += 1
 
-            # Build speaker_names map from unique speakers in transcript
+                for w in words:
+                    w["start"] += cumulative_offset
+                    w["end"] += cumulative_offset
+                    w["source_index"] = idx
+                    merged_words.append(w)
+
+                speaker_offset += len(file_speakers)
+                cumulative_offset += duration
+
+            # Build speaker_names from merged segments
             seen = []
-            for seg in segments:
+            for seg in merged_segments:
                 spk = seg.get("speaker", "S1")
                 if spk not in seen:
                     seen.append(spk)
             speaker_names = {spk: spk for spk in seen}
 
-            state["transcript"] = segments
-            state["words"] = words
+            # Save state
+            state["transcript"] = merged_segments
+            state["words"] = merged_words
             state["text_clips"] = []
             state["clips"] = []
             state["status"] = "transcribed"
-            state["filename"] = filename
+            state["source_file"] = saved_files[0][1]  # backward compat
+            state["source_files"] = source_files_info
+            state["filename"] = ", ".join(fn for fn, _ in saved_files)
             state["transcription_language"] = whisper_lang or "auto"
             state["speaker_names"] = speaker_names
+            if warnings:
+                state["transcription_warnings"] = warnings
             save_state(state)
             progress.update(current=progress["total"], message="done", phase=None)
 
@@ -515,9 +662,15 @@ def remove_clip():
 @app.route("/cut_clips", methods=["POST"])
 def cut_clips():
     state = load_state()
+    source_files = state.get("source_files", [])
     source = state.get("source_file")
 
-    if not source or not os.path.exists(source):
+    # Validate we have at least one source file available
+    if source_files:
+        has_valid = any(os.path.exists(sf["path"]) for sf in source_files)
+        if not has_valid:
+            return jsonify({"error": "Source audio file not found"}), 400
+    elif not source or not os.path.exists(source):
         return jsonify({"error": "Source audio file not found"}), 400
 
     text_clips = state.get("text_clips", [])
@@ -530,9 +683,12 @@ def cut_clips():
     def do_cut():
       try:
         st = load_state()
-        source_path = st.get("source_file", "")
-        if not source_path or not os.path.exists(source_path):
-            st["status"] = f"error: source file not found — {source_path}"
+
+        # Validate source availability
+        sf_list = st.get("source_files", [])
+        legacy_source = st.get("source_file", "")
+        if not sf_list and (not legacy_source or not os.path.exists(legacy_source)):
+            st["status"] = f"error: source file not found — {legacy_source}"
             save_state(st)
             progress.update(phase=None, message="")
             return
@@ -543,12 +699,15 @@ def cut_clips():
         cut_files = []
         for i, clip in enumerate(clips):
             progress.update(current=i, message=f"cutting {clip['id']}… ({i+1}/{len(clips)})")
+            source_path, real_start, real_end = resolve_source_for_clip(clip, st)
+            if not source_path or not os.path.exists(source_path):
+                continue
             out_path = os.path.join(pdir("clips"), f"{clip['id']}.wav")
-            duration = clip["end"] - clip["start"]
+            duration = real_end - real_start
             cmd = [
                 "ffmpeg", "-y",
                 "-i", source_path,
-                "-ss", str(clip["start"]),
+                "-ss", str(real_start),
                 "-t", str(duration),
                 "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1",
                 out_path
@@ -1147,6 +1306,65 @@ def waveform():
     return jsonify({"points": points, "duration": round(duration, 2)})
 
 
+@app.route("/waveform_multi")
+def waveform_multi():
+    """Combined waveform from all source files for multi-file projects."""
+    n_points = int(request.args.get("points", 1000))
+
+    source_files = state.get("source_files", [])
+    if not source_files:
+        # Legacy single-file fallback
+        sf = state.get("source_file", "")
+        if not sf:
+            return jsonify({"error": "No source files"}), 404
+        source_files = [{"path": sf}]
+
+    all_samples = []
+    total_duration = 0.0
+
+    for sf in source_files:
+        filepath = sf.get("path", "")
+        if not filepath:
+            continue
+        filepath = safe_project_path(filepath)
+        if not os.path.exists(filepath):
+            continue
+
+        cmd = [
+            "ffmpeg", "-i", filepath,
+            "-ac", "1", "-filter:a", "aresample=100",
+            "-map_metadata", "-1",
+            "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"
+        ]
+        result = subprocess.run(cmd, capture_output=True)
+        if result.returncode != 0 or not result.stdout:
+            continue
+
+        raw = result.stdout
+        n_samples = len(raw) // 2
+        samples = struct.unpack(f"<{n_samples}h", raw)
+        all_samples.extend(samples)
+        total_duration += n_samples / 100.0
+
+    if not all_samples:
+        return jsonify({"error": "No audio data"}), 500
+
+    n_total = len(all_samples)
+    chunk = max(1, n_total // n_points)
+    rms_list = []
+    for i in range(0, n_total, chunk):
+        seg = all_samples[i:i + chunk]
+        rms = (sum(s * s for s in seg) / len(seg)) ** 0.5
+        rms_list.append(rms)
+
+    max_rms = max(rms_list) if rms_list else 1.0
+    if max_rms == 0:
+        max_rms = 1.0
+    points = [round(r / max_rms, 4) for r in rms_list]
+
+    return jsonify({"points": points, "duration": round(total_duration, 2)})
+
+
 @app.route("/audio_snippet")
 def audio_snippet():
     """Extract a small audio snippet on the fly as MP3 — instant playback, no buffering."""
@@ -1326,6 +1544,8 @@ def _migrate_paths(state, project_dir):
         return path
 
     state["source_file"] = fix(state.get("source_file"))
+    for sf in state.get("source_files", []):
+        sf["path"] = fix(sf.get("path", ""))
     state["narration_source"] = fix(state.get("narration_source"))
     for c in state.get("clips", []):
         c["path"] = fix(c.get("path", ""))

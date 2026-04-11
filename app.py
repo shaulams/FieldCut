@@ -1306,6 +1306,65 @@ def waveform():
     return jsonify({"points": points, "duration": round(duration, 2)})
 
 
+@app.route("/waveform_multi")
+def waveform_multi():
+    """Combined waveform from all source files for multi-file projects."""
+    n_points = int(request.args.get("points", 1000))
+
+    source_files = state.get("source_files", [])
+    if not source_files:
+        # Legacy single-file fallback
+        sf = state.get("source_file", "")
+        if not sf:
+            return jsonify({"error": "No source files"}), 404
+        source_files = [{"path": sf}]
+
+    all_samples = []
+    total_duration = 0.0
+
+    for sf in source_files:
+        filepath = sf.get("path", "")
+        if not filepath:
+            continue
+        filepath = safe_project_path(filepath)
+        if not os.path.exists(filepath):
+            continue
+
+        cmd = [
+            "ffmpeg", "-i", filepath,
+            "-ac", "1", "-filter:a", "aresample=100",
+            "-map_metadata", "-1",
+            "-f", "s16le", "-acodec", "pcm_s16le", "pipe:1"
+        ]
+        result = subprocess.run(cmd, capture_output=True)
+        if result.returncode != 0 or not result.stdout:
+            continue
+
+        raw = result.stdout
+        n_samples = len(raw) // 2
+        samples = struct.unpack(f"<{n_samples}h", raw)
+        all_samples.extend(samples)
+        total_duration += n_samples / 100.0
+
+    if not all_samples:
+        return jsonify({"error": "No audio data"}), 500
+
+    n_total = len(all_samples)
+    chunk = max(1, n_total // n_points)
+    rms_list = []
+    for i in range(0, n_total, chunk):
+        seg = all_samples[i:i + chunk]
+        rms = (sum(s * s for s in seg) / len(seg)) ** 0.5
+        rms_list.append(rms)
+
+    max_rms = max(rms_list) if rms_list else 1.0
+    if max_rms == 0:
+        max_rms = 1.0
+    points = [round(r / max_rms, 4) for r in rms_list]
+
+    return jsonify({"points": points, "duration": round(total_duration, 2)})
+
+
 @app.route("/audio_snippet")
 def audio_snippet():
     """Extract a small audio snippet on the fly as MP3 — instant playback, no buffering."""

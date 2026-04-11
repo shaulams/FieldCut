@@ -239,6 +239,21 @@ def load_state():
     if os.path.exists(sf):
         with open(sf) as f:
             state = json.load(f)
+        # Backward compat: populate source_files from legacy source_file
+        if state.get("source_file") and not state.get("source_files"):
+            path = state["source_file"]
+            if os.path.exists(path):
+                try:
+                    dur_result = subprocess.run(
+                        ["ffprobe", "-v", "quiet", "-show_entries", "format=duration", "-of", "csv=p=0", path],
+                        capture_output=True, text=True)
+                    duration = float(dur_result.stdout.strip())
+                except Exception:
+                    duration = 0
+                state["source_files"] = [{
+                    "filename": state.get("filename", os.path.basename(path)),
+                    "path": path, "offset": 0, "duration": duration
+                }]
         # Auto-detect phase for legacy projects that predate the phase system
         if "phase" not in state:
             status = state.get("status", "")
@@ -1456,6 +1471,8 @@ def _migrate_paths(state, project_dir):
         return path
 
     state["source_file"] = fix(state.get("source_file"))
+    for sf in state.get("source_files", []):
+        sf["path"] = fix(sf.get("path", ""))
     state["narration_source"] = fix(state.get("narration_source"))
     for c in state.get("clips", []):
         c["path"] = fix(c.get("path", ""))

@@ -99,6 +99,26 @@ def get_clip_speaker(clip, transcript):
             best = seg.get("speaker", "S1")
     return best
 
+def resolve_source_for_clip(clip, state):
+    """Given a clip with start/end times, find the correct source file and real timestamps."""
+    source_files = state.get("source_files", [])
+    if not source_files:
+        # Legacy single-file project
+        sf = state.get("source_file", "")
+        return sf, clip["start"], clip["end"]
+
+    # Find which source file this clip belongs to by checking timestamp range
+    for i, sf in enumerate(source_files):
+        offset = sf["offset"]
+        end_time = offset + sf["duration"]
+        if clip["start"] >= offset and clip["start"] < end_time:
+            real_start = clip["start"] - offset
+            real_end = clip["end"] - offset
+            return sf["path"], real_start, real_end
+    # Fallback to last file
+    sf = source_files[-1]
+    return sf["path"], clip["start"] - sf["offset"], clip["end"] - sf["offset"]
+
 # Load .env file if present (so OPENAI_API_KEY persists across sessions)
 try:
     from dotenv import load_dotenv
@@ -231,7 +251,7 @@ def load_state():
         return state
     return {"transcript": [], "words": [], "clips": [], "text_clips": [],
             "narration_transcript": [], "narration_words": [], "narr_text_clips": [],
-            "narration": [], "assembly": [], "source_file": None, "phase": 1}
+            "narration": [], "assembly": [], "source_file": None, "source_files": [], "phase": 1}
 
 def save_state(state):
     with open(state_file(), "w") as f:
@@ -515,9 +535,15 @@ def remove_clip():
 @app.route("/cut_clips", methods=["POST"])
 def cut_clips():
     state = load_state()
+    source_files = state.get("source_files", [])
     source = state.get("source_file")
 
-    if not source or not os.path.exists(source):
+    # Validate we have at least one source file available
+    if source_files:
+        has_valid = any(os.path.exists(sf["path"]) for sf in source_files)
+        if not has_valid:
+            return jsonify({"error": "Source audio file not found"}), 400
+    elif not source or not os.path.exists(source):
         return jsonify({"error": "Source audio file not found"}), 400
 
     text_clips = state.get("text_clips", [])
@@ -530,9 +556,12 @@ def cut_clips():
     def do_cut():
       try:
         st = load_state()
-        source_path = st.get("source_file", "")
-        if not source_path or not os.path.exists(source_path):
-            st["status"] = f"error: source file not found — {source_path}"
+
+        # Validate source availability
+        sf_list = st.get("source_files", [])
+        legacy_source = st.get("source_file", "")
+        if not sf_list and (not legacy_source or not os.path.exists(legacy_source)):
+            st["status"] = f"error: source file not found — {legacy_source}"
             save_state(st)
             progress.update(phase=None, message="")
             return
@@ -543,12 +572,15 @@ def cut_clips():
         cut_files = []
         for i, clip in enumerate(clips):
             progress.update(current=i, message=f"cutting {clip['id']}… ({i+1}/{len(clips)})")
+            source_path, real_start, real_end = resolve_source_for_clip(clip, st)
+            if not source_path or not os.path.exists(source_path):
+                continue
             out_path = os.path.join(pdir("clips"), f"{clip['id']}.wav")
-            duration = clip["end"] - clip["start"]
+            duration = real_end - real_start
             cmd = [
                 "ffmpeg", "-y",
                 "-i", source_path,
-                "-ss", str(clip["start"]),
+                "-ss", str(real_start),
                 "-t", str(duration),
                 "-c:a", "pcm_s16le", "-ar", "44100", "-ac", "1",
                 out_path

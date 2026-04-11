@@ -453,7 +453,7 @@
             <button class="btn" onclick="loadDemo()" style="width:auto;padding:6px 16px;font-size:12px;opacity:0.7" data-i18n="try_demo"></button>
           </div>
         </div>
-        <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" onchange="uploadAndTranscribe(event)">
+        <input type="file" id="audio-input" accept=".wav,.mp3,.m4a,.ogg" multiple onchange="uploadAndTranscribe(event)">
         <div id="speaker-legend"></div>
         <div class="search-bar" id="search-bar">
           <input type="text" id="search-input" data-i18n-placeholder="search_placeholder" aria-label="Search transcript" oninput="doSearch()" onkeydown="searchKeydown(event)">
@@ -771,15 +771,18 @@ async function loadDemo() {
 }
 
 async function uploadAndTranscribe(event) {
-  const file = event.target.files[0];
-  if (!file) return;
+  const files = Array.from(event.target.files);
+  if (!files.length) return;
   document.getElementById('upload-zone').style.display = 'none';
-  document.getElementById('file-info').textContent = file.name;
+  document.getElementById('file-info').textContent =
+    files.length === 1 ? files[0].name : `${files.length} files selected`;
   setStatus('working', t('transcribing'));
   const whisperLang = document.getElementById('whisper-lang').value;
   const diarize = document.getElementById('diarize-toggle').checked;
   const formData = new FormData();
-  formData.append('file', file);
+  for (const file of files) {
+    formData.append('file', file);
+  }
   formData.append('language', whisperLang);
   if (diarize) formData.append('diarize', '1');
   const res = await fetch('/transcribe', { method: 'POST', body: formData });
